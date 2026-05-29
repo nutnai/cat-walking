@@ -7,6 +7,7 @@ final class AppSettings: ObservableObject {
         static let catScale = "catScale"
         static let animationFPS = "animationFPS"
         static let movementSpeed = "movementSpeed"
+        static let sitPreference = "sitPreference"
         static let stayOnTop = "stayOnTop"
         static let enableWalkDown = "enableWalkDown"
         static let enableWalkLeft = "enableWalkLeft"
@@ -28,6 +29,10 @@ final class AppSettings: ObservableObject {
 
     @Published var movementSpeed: Double {
         didSet { defaults.set(movementSpeed, forKey: Keys.movementSpeed) }
+    }
+
+    @Published var sitPreference: Double {
+        didSet { defaults.set(sitPreference, forKey: Keys.sitPreference) }
     }
 
     @Published var stayOnTop: Bool {
@@ -63,6 +68,7 @@ final class AppSettings: ObservableObject {
         self.catScale = defaults.object(forKey: Keys.catScale) as? Double ?? 1.0
         self.animationFPS = defaults.object(forKey: Keys.animationFPS) as? Double ?? 3.0
         self.movementSpeed = defaults.object(forKey: Keys.movementSpeed) as? Double ?? 30.0
+        self.sitPreference = defaults.object(forKey: Keys.sitPreference) as? Double ?? 0.7
         self.stayOnTop = defaults.object(forKey: Keys.stayOnTop) as? Bool ?? true
         self.enableWalkDown = defaults.object(forKey: Keys.enableWalkDown) as? Bool ?? false
         self.enableWalkLeft = defaults.object(forKey: Keys.enableWalkLeft) as? Bool ?? true

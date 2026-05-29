@@ -37,6 +37,11 @@ final class PetEngine: ObservableObject {
         case exiting
     }
 
+    private enum GroomPlaybackState {
+        case inactive
+        case active
+    }
+
     @Published private(set) var currentFrame: NSImage
     @Published private(set) var contentSize: CGSize
     @Published private(set) var positionX: CGFloat
@@ -51,7 +56,10 @@ final class PetEngine: ObservableObject {
     private var screenFrame: CGRect
     private var currentFrameIndex = 0
     private var idlePlaybackState: IdlePlaybackState = .inactive
+    private var groomPlaybackState: GroomPlaybackState = .inactive
+    private var remainingGroomLoops = 0
     private var pendingBehaviorAfterIdleExit: Behavior?
+    private var pendingBehaviorAfterIdleSit: Behavior?
 
     init(settings: AppSettings, spriteSheet: SpriteSheet) {
         self.settings = settings
@@ -160,6 +168,11 @@ final class PetEngine: ObservableObject {
             return
         }
 
+        if behavior == .groom {
+            advanceGroomAnimationFrame(frames: frames)
+            return
+        }
+
         currentFrameIndex = (currentFrameIndex + 1) % frames.count
         updateFrameImage()
     }
@@ -201,12 +214,40 @@ final class PetEngine: ObservableObject {
     }
 
     private func nextAutomaticBehavior(preferred: Behavior? = nil) -> Behavior {
+        if behavior == .idle, idlePlaybackState == .seated {
+            return nextBehaviorWhileSeated(preferred: preferred)
+        }
+
         if let preferred, isBehaviorEnabled(preferred) {
             return preferred
         }
 
         let availableBehaviors = automaticBehaviorPool()
         return availableBehaviors.randomElement() ?? .idle
+    }
+
+    private func nextBehaviorWhileSeated(preferred: Behavior? = nil) -> Behavior {
+        if let preferred {
+            if preferred == .groom, isBehaviorEnabled(.groom) {
+                return .groom
+            }
+
+            if preferred != .idle, isBehaviorEnabled(preferred) {
+                return preferred
+            }
+        }
+
+        if isBehaviorEnabled(.idle), Double.random(in: 0 ... 1) < seatedIdleHoldChance {
+            return .idle
+        }
+
+        if isBehaviorEnabled(.groom), Bool.random() {
+            return .groom
+        }
+
+        let standingBehaviors = [Behavior.walkDown, .walkLeft, .walkRight, .walkUp]
+            .filter(isBehaviorEnabled)
+        return standingBehaviors.randomElement() ?? .idle
     }
 
     private func automaticBehaviorPool() -> [Behavior] {
@@ -218,14 +259,38 @@ final class PetEngine: ObservableObject {
             return isBehaviorEnabled(.walkLeft) ? [.walkLeft] : fallbackBehaviors()
         }
 
-        return [
-            isBehaviorEnabled(.walkDown) ? .walkDown : nil,
-            isBehaviorEnabled(.walkLeft) ? .walkLeft : nil,
-            isBehaviorEnabled(.walkRight) ? .walkRight : nil,
-            isBehaviorEnabled(.walkUp) ? .walkUp : nil,
-            isBehaviorEnabled(.idle) ? .idle : nil,
-            isBehaviorEnabled(.groom) ? .groom : nil,
-        ].compactMap { $0 }
+        var weightedBehaviors: [Behavior] = []
+
+        if isBehaviorEnabled(.idle) {
+            let idleWeight = max(1, Int(round(settings.sitPreference * 6)))
+            weightedBehaviors.append(contentsOf: Array(repeating: .idle, count: idleWeight))
+        }
+
+        if isBehaviorEnabled(.walkLeft) {
+            weightedBehaviors.append(.walkLeft)
+        }
+
+        if isBehaviorEnabled(.walkRight) {
+            weightedBehaviors.append(.walkRight)
+        }
+
+        if isBehaviorEnabled(.walkDown) {
+            weightedBehaviors.append(.walkDown)
+        }
+
+        if isBehaviorEnabled(.walkUp) {
+            weightedBehaviors.append(.walkUp)
+        }
+
+        if isBehaviorEnabled(.groom) {
+            weightedBehaviors.append(.groom)
+        }
+
+        return weightedBehaviors
+    }
+
+    private var seatedIdleHoldChance: Double {
+        min(max(0.25 + settings.sitPreference * 0.5, 0), 0.95)
     }
 
     private var maximumPositionX: CGFloat {
@@ -276,9 +341,18 @@ final class PetEngine: ObservableObject {
 
         if newBehavior == .idle {
             idlePlaybackState = .entering
+            groomPlaybackState = .inactive
+            remainingGroomLoops = 0
+            currentFrameIndex = 0
+        } else if newBehavior == .groom {
+            idlePlaybackState = .seated
+            groomPlaybackState = .active
+            remainingGroomLoops = Int.random(in: 1 ... 5)
             currentFrameIndex = 0
         } else {
             idlePlaybackState = .inactive
+            groomPlaybackState = .inactive
+            remainingGroomLoops = 0
             currentFrameIndex = 0
         }
 
@@ -295,6 +369,32 @@ final class PetEngine: ObservableObject {
     }
 
     private func transition(to nextBehavior: Behavior) {
+        if nextBehavior == .idle,
+           behavior == .idle,
+           idlePlaybackState == .seated {
+            applySeatedIdleHold()
+            return
+        }
+
+        if nextBehavior == .groom,
+           behavior == .idle,
+           idlePlaybackState == .seated {
+            applyBehavior(.groom)
+            return
+        }
+
+        if nextBehavior == .groom,
+           behavior != .idle || idlePlaybackState != .seated {
+            beginIdleEnterTransition(for: .groom)
+            return
+        }
+
+        if behavior == .groom,
+           nextBehavior != .groom {
+            beginReturnToSeatedIdle(nextBehavior: nextBehavior)
+            return
+        }
+
         if behavior == .idle,
            nextBehavior != .idle,
            idlePlaybackState != .exiting {
@@ -303,6 +403,25 @@ final class PetEngine: ObservableObject {
         }
 
         applyBehavior(nextBehavior)
+    }
+
+    private func beginIdleEnterTransition(for nextBehavior: Behavior) {
+        pendingBehaviorAfterIdleSit = nextBehavior
+
+        if behavior == .idle {
+            if idlePlaybackState == .seated {
+                let pending = pendingBehaviorAfterIdleSit
+                pendingBehaviorAfterIdleSit = nil
+                if let pending {
+                    transition(to: pending)
+                }
+            } else if idlePlaybackState == .inactive || idlePlaybackState == .exiting {
+                applyBehavior(.idle)
+            }
+            return
+        }
+
+        applyBehavior(.idle)
     }
 
     private func beginIdleExitTransition(to nextBehavior: Behavior) {
@@ -329,6 +448,13 @@ final class PetEngine: ObservableObject {
                 currentFrameIndex += 1
             } else {
                 idlePlaybackState = .seated
+
+                if let pendingBehaviorAfterIdleSit {
+                    let pending = pendingBehaviorAfterIdleSit
+                    self.pendingBehaviorAfterIdleSit = nil
+                    transition(to: pending)
+                    return
+                }
             }
         case .seated:
             currentFrameIndex = frames.count - 1
@@ -347,6 +473,49 @@ final class PetEngine: ObservableObject {
         updateFrameImage()
     }
 
+    private func advanceGroomAnimationFrame(frames: [NSImage]) {
+        guard !frames.isEmpty else { return }
+
+        switch groomPlaybackState {
+        case .inactive:
+            currentFrameIndex = min(currentFrameIndex, frames.count - 1)
+            updateFrameImage()
+        case .active:
+            if currentFrameIndex < frames.count - 1 {
+                currentFrameIndex += 1
+                updateFrameImage()
+                return
+            }
+
+            if remainingGroomLoops > 1 {
+                remainingGroomLoops -= 1
+                currentFrameIndex = 0
+                updateFrameImage()
+                return
+            }
+
+            remainingGroomLoops = 0
+            groomPlaybackState = .inactive
+            applySeatedIdleHold()
+        }
+    }
+
+    private func beginReturnToSeatedIdle(nextBehavior: Behavior) {
+        pendingBehaviorAfterIdleSit = nextBehavior == .idle ? nil : nextBehavior
+        applySeatedIdleHold()
+    }
+
+    private func applySeatedIdleHold() {
+        let idleFrames = spriteSheet.frames(for: .idle)
+        behavior = .idle
+        idlePlaybackState = .seated
+        groomPlaybackState = .inactive
+        remainingGroomLoops = 0
+        currentFrameIndex = max(0, idleFrames.count - 1)
+        updateFrameImage()
+        scheduleBehaviorTimer(for: .idle)
+    }
+
     private func scheduleBehaviorTimer(for behavior: Behavior) {
         let duration: ClosedRange<Double>
         switch behavior {
@@ -359,7 +528,7 @@ final class PetEngine: ObservableObject {
         case .idle:
             duration = 2.0 ... 4.0
         case .groom:
-            duration = 3.0 ... 5.5
+            duration = 0.6 ... 0.6
         }
 
         behaviorTimer?.invalidate()

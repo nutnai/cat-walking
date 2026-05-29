@@ -39,6 +39,16 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.movementSpeed, in: 30 ... 260, step: 5)
                 }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Sit Frequency")
+                        Spacer()
+                        Text(String(format: "%.0f%%", settings.sitPreference * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.sitPreference, in: 0 ... 1, step: 0.05)
+                }
             }
 
             Section("Enabled Animations") {

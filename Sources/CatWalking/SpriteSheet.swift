@@ -69,6 +69,11 @@ struct SpriteSheet {
     let framesByRow: [[NSImage]]
     let frameSize: CGSize
 
+    private struct TrimmedFrame {
+        let cgImage: CGImage
+        let size: CGSize
+    }
+
     func frames(for sequence: SpriteSequence) -> [NSImage] {
         let rowIndex = configuration.animationMapping.rowIndex(for: sequence)
         guard framesByRow.indices.contains(rowIndex) else {
@@ -110,13 +115,19 @@ struct SpriteSheet {
             return nil
         }
 
-        let maxFrameWidth = frameRects
+        let trimmedFramesByRow = frameRects.map { rowRects in
+            rowRects.compactMap { cropRect in
+                trimmedFrame(from: cgImage, cropRect: cropRect)
+            }
+        }
+
+        let maxFrameWidth = trimmedFramesByRow
             .flatMap { $0 }
-            .map { Int($0.width) }
+            .map { Int($0.size.width) }
             .max() ?? 0
-        let maxFrameHeight = frameRects
+        let maxFrameHeight = trimmedFramesByRow
             .flatMap { $0 }
-            .map { Int($0.height) }
+            .map { Int($0.size.height) }
             .max() ?? 0
 
         guard maxFrameWidth > 0, maxFrameHeight > 0 else {
@@ -125,19 +136,18 @@ struct SpriteSheet {
 
         var framesByRow: [[NSImage]] = []
 
-        for rowRects in frameRects {
-            var rowFrames: [NSImage] = []
-            for cropRect in rowRects {
+        for trimmedRow in trimmedFramesByRow {
+            var renderedRow: [NSImage] = []
+            for trimmedFrame in trimmedRow {
                 guard let frameImage = paddedFrameImage(
-                    from: cgImage,
-                    cropRect: cropRect,
+                    trimmedFrame: trimmedFrame,
                     canvasSize: CGSize(width: maxFrameWidth, height: maxFrameHeight)
                 ) else {
                     continue
                 }
-                rowFrames.append(frameImage)
+                renderedRow.append(frameImage)
             }
-            framesByRow.append(rowFrames)
+            framesByRow.append(renderedRow)
         }
 
         return SpriteSheet(
@@ -317,10 +327,31 @@ struct SpriteSheet {
     }
 
     private static func paddedFrameImage(
-        from cgImage: CGImage,
-        cropRect: CGRect,
+        trimmedFrame: TrimmedFrame,
         canvasSize: CGSize
     ) -> NSImage? {
+        let image = NSImage(size: canvasSize)
+        image.lockFocus()
+
+        NSColor.clear.setFill()
+        NSBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
+
+        let destinationRect = CGRect(
+            x: (canvasSize.width - trimmedFrame.size.width) / 2,
+            y: 0,
+            width: trimmedFrame.size.width,
+            height: trimmedFrame.size.height
+        )
+
+        NSGraphicsContext.current?.imageInterpolation = .none
+        NSImage(cgImage: trimmedFrame.cgImage, size: trimmedFrame.size)
+            .draw(in: destinationRect)
+
+        image.unlockFocus()
+        return image
+    }
+
+    private static func trimmedFrame(from cgImage: CGImage, cropRect: CGRect) -> TrimmedFrame? {
         let integralRect = CGRect(
             x: Int(cropRect.origin.x),
             y: Int(cropRect.origin.y),
@@ -332,25 +363,38 @@ struct SpriteSheet {
             return nil
         }
 
-        let image = NSImage(size: canvasSize)
-        image.lockFocus()
+        guard let opaqueBounds = opaqueBounds(in: cropped),
+              let trimmedImage = cropped.cropping(to: opaqueBounds)
+        else {
+            return TrimmedFrame(cgImage: cropped, size: integralRect.size)
+        }
 
-        NSColor.clear.setFill()
-        NSBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
-
-        let destinationRect = CGRect(
-            x: (canvasSize.width - integralRect.width) / 2,
-            y: (canvasSize.height - integralRect.height) / 2,
-            width: integralRect.width,
-            height: integralRect.height
+        return TrimmedFrame(
+            cgImage: trimmedImage,
+            size: CGSize(width: opaqueBounds.width, height: opaqueBounds.height)
         )
+    }
 
-        NSGraphicsContext.current?.imageInterpolation = .none
-        NSImage(cgImage: cropped, size: CGSize(width: integralRect.width, height: integralRect.height))
-            .draw(in: destinationRect)
+    private static func opaqueBounds(in cgImage: CGImage) -> CGRect? {
+        guard let occupancy = occupancyMap(for: cgImage) else {
+            return nil
+        }
 
-        image.unlockFocus()
-        return image
+        let xRanges = contiguousRanges(from: occupancy.columns)
+        let yRanges = contiguousRanges(from: occupancy.rows)
+
+        guard let xRange = xRanges.first,
+              let yRange = yRanges.first
+        else {
+            return nil
+        }
+
+        return CGRect(
+            x: xRange.lowerBound,
+            y: yRange.lowerBound,
+            width: xRange.upperBound - xRange.lowerBound,
+            height: yRange.upperBound - yRange.lowerBound
+        )
     }
 
     private static func bundledImageNames() -> [String] {

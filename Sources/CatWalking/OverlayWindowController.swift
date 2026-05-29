@@ -76,6 +76,12 @@ final class OverlayWindowController {
             }
             .store(in: &cancellables)
 
+        settings.$sitPreference
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
         settings.$enableWalkLeft
             .sink { [weak self] _ in
                 self?.engine.settingsDidChange()
