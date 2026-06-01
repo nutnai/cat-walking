@@ -1,11 +1,33 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
 
+    private var availableCatTemplates: [String] {
+        [SpriteSheet.defaultTemplateSelection] + SpriteSheet.availableTemplateNames()
+    }
+
+    private var maximumVerticalRange: Double {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 1600
+        return max(40, screenHeight)
+    }
+
+    private var maximumVerticalOffset: Double {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 1600
+        return max(0, screenHeight)
+    }
+
     var body: some View {
         Form {
             Section("Appearance") {
+                Picker("Cat Template", selection: $settings.selectedCatTemplate) {
+                    ForEach(availableCatTemplates, id: \.self) { templateName in
+                        Text(SpriteSheet.displayName(for: templateName))
+                            .tag(templateName)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Cat Scale")
@@ -13,7 +35,11 @@ struct SettingsView: View {
                         Text(String(format: "%.1fx", settings.catScale))
                             .foregroundStyle(.secondary)
                     }
-                    Slider(value: $settings.catScale, in: 1 ... 4, step: 0.5)
+                    Slider(
+                        value: $settings.catScale,
+                        in: 0.1 ... 2.0,
+                        step: 0.1
+                    )
                 }
 
                 Toggle("Stay on Top", isOn: $settings.stayOnTop)
@@ -49,13 +75,41 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.sitPreference, in: 0 ... 1, step: 0.05)
                 }
+
+                Toggle("Enable Move Up and Down", isOn: $settings.enableVerticalMovement)
+
+                HStack {
+                    Toggle("Walk Up", isOn: $settings.enableWalkUp)
+                    Toggle("Walk Down", isOn: $settings.enableWalkDown)
+                }
+                .disabled(!settings.enableVerticalMovement)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Default Y Axis")
+                        Spacer()
+                        Text(String(format: "%.0f pt", settings.defaultYOffset))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.defaultYOffset, in: 0 ... maximumVerticalOffset, step: 10)
+                }
+                .disabled(!settings.enableVerticalMovement)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Vertical Range")
+                        Spacer()
+                        Text(String(format: "%.0f pt", settings.verticalMovementRange))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.verticalMovementRange, in: 40 ... maximumVerticalRange, step: 10)
+                }
+                .disabled(!settings.enableVerticalMovement)
             }
 
             Section("Enabled Animations") {
-                Toggle("Walk Down", isOn: $settings.enableWalkDown)
                 Toggle("Walk Left", isOn: $settings.enableWalkLeft)
                 Toggle("Walk Right", isOn: $settings.enableWalkRight)
-                Toggle("Walk Up", isOn: $settings.enableWalkUp)
                 Toggle("Idle", isOn: $settings.enableIdle)
                 Toggle("Groom", isOn: $settings.enableGroom)
 

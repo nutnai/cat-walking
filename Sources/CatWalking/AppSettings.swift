@@ -3,10 +3,15 @@ import Combine
 
 @MainActor
 final class AppSettings: ObservableObject {
+
     private enum Keys {
+        static let selectedCatTemplate = "selectedCatTemplate"
         static let catScale = "catScale"
         static let animationFPS = "animationFPS"
         static let movementSpeed = "movementSpeed"
+        static let enableVerticalMovement = "enableVerticalMovement"
+        static let defaultYOffset = "defaultYOffset"
+        static let verticalMovementRange = "verticalMovementRange"
         static let sitPreference = "sitPreference"
         static let stayOnTop = "stayOnTop"
         static let enableWalkDown = "enableWalkDown"
@@ -19,6 +24,10 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
+    @Published var selectedCatTemplate: String {
+        didSet { defaults.set(selectedCatTemplate, forKey: Keys.selectedCatTemplate) }
+    }
+
     @Published var catScale: Double {
         didSet { defaults.set(catScale, forKey: Keys.catScale) }
     }
@@ -29,6 +38,24 @@ final class AppSettings: ObservableObject {
 
     @Published var movementSpeed: Double {
         didSet { defaults.set(movementSpeed, forKey: Keys.movementSpeed) }
+    }
+
+    @Published var enableVerticalMovement: Bool {
+        didSet {
+            if !enableVerticalMovement {
+                enableWalkDown = false
+                enableWalkUp = false
+            }
+            defaults.set(enableVerticalMovement, forKey: Keys.enableVerticalMovement)
+        }
+    }
+
+    @Published var defaultYOffset: Double {
+        didSet { defaults.set(defaultYOffset, forKey: Keys.defaultYOffset) }
+    }
+
+    @Published var verticalMovementRange: Double {
+        didSet { defaults.set(verticalMovementRange, forKey: Keys.verticalMovementRange) }
     }
 
     @Published var sitPreference: Double {
@@ -65,9 +92,13 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.selectedCatTemplate = defaults.string(forKey: Keys.selectedCatTemplate) ?? SpriteSheet.defaultTemplateSelection
         self.catScale = defaults.object(forKey: Keys.catScale) as? Double ?? 1.0
         self.animationFPS = defaults.object(forKey: Keys.animationFPS) as? Double ?? 3.0
         self.movementSpeed = defaults.object(forKey: Keys.movementSpeed) as? Double ?? 30.0
+        self.enableVerticalMovement = defaults.object(forKey: Keys.enableVerticalMovement) as? Bool ?? false
+        self.defaultYOffset = defaults.object(forKey: Keys.defaultYOffset) as? Double ?? 0.0
+        self.verticalMovementRange = defaults.object(forKey: Keys.verticalMovementRange) as? Double ?? 180.0
         self.sitPreference = defaults.object(forKey: Keys.sitPreference) as? Double ?? 0.7
         self.stayOnTop = defaults.object(forKey: Keys.stayOnTop) as? Bool ?? true
         self.enableWalkDown = defaults.object(forKey: Keys.enableWalkDown) as? Bool ?? false
@@ -76,5 +107,10 @@ final class AppSettings: ObservableObject {
         self.enableWalkUp = defaults.object(forKey: Keys.enableWalkUp) as? Bool ?? false
         self.enableIdle = defaults.object(forKey: Keys.enableIdle) as? Bool ?? false
         self.enableGroom = defaults.object(forKey: Keys.enableGroom) as? Bool ?? true
+
+        if !enableVerticalMovement {
+            enableWalkDown = false
+            enableWalkUp = false
+        }
     }
 }

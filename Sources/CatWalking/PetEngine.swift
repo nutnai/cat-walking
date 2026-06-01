@@ -4,6 +4,19 @@ import Foundation
 
 @MainActor
 final class PetEngine: ObservableObject {
+    private static let groomLoopStartFrame = 1
+    private static let groomLoopEndFrame = 3
+
+    private struct PreferredBehaviorOption {
+        let behavior: Behavior
+        let chance: Double
+
+        init(_ behavior: Behavior, chance: Double = 1.0) {
+            self.behavior = behavior
+            self.chance = min(max(chance, 0), 1)
+        }
+    }
+
     enum Behavior: CaseIterable {
         case walkDown
         case walkLeft
@@ -45,11 +58,12 @@ final class PetEngine: ObservableObject {
     @Published private(set) var currentFrame: NSImage
     @Published private(set) var contentSize: CGSize
     @Published private(set) var positionX: CGFloat
+    @Published private(set) var positionY: CGFloat
     @Published private(set) var behavior: Behavior
     @Published private(set) var manualBehaviorOverride: Behavior?
 
     private let settings: AppSettings
-    private let spriteSheet: SpriteSheet
+    private var spriteSheet: SpriteSheet
     private var animationTimer: Timer?
     private var movementTimer: Timer?
     private var behaviorTimer: Timer?
@@ -64,14 +78,16 @@ final class PetEngine: ObservableObject {
     init(settings: AppSettings, spriteSheet: SpriteSheet) {
         self.settings = settings
         self.spriteSheet = spriteSheet
-        self.screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        self.screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 2560, height: 1600)
         self.behavior = .idle
         self.manualBehaviorOverride = nil
         self.currentFrame = spriteSheet.frames(for: .idle).first ?? NSImage(size: spriteSheet.frameSize)
         self.contentSize = CGSize(width: spriteSheet.frameSize.width * settings.catScale, height: spriteSheet.frameSize.height * settings.catScale)
         self.positionX = 0
+        self.positionY = 0
 
         positionX = max(0, (screenFrame.width - contentSize.width) / 2)
+        positionY = clampedPositionY(settings.defaultYOffset)
     }
 
     func start() {
@@ -96,6 +112,13 @@ final class PetEngine: ObservableObject {
         refreshContentSize()
         restartAnimationTimer()
         reconcileBehaviorAvailability()
+    }
+
+    func reloadSpriteSheet(_ newSpriteSheet: SpriteSheet) {
+        spriteSheet = newSpriteSheet
+        currentFrameIndex = 0
+        refreshContentSize()
+        updateFrameImage()
     }
 
     func setManualBehaviorOverride(_ behavior: Behavior?) {
@@ -182,26 +205,55 @@ final class PetEngine: ObservableObject {
 
         switch behavior {
         case .walkDown:
-            break
+            guard settings.enableVerticalMovement else { break }
+            positionY -= delta
+            if positionY <= minimumPositionY {
+                positionY = minimumPositionY
+                chooseNextBehavior(preferred: [
+                    PreferredBehaviorOption(.walkUp, chance: 0.30),
+                    PreferredBehaviorOption(.idle, chance: 1)
+                ])
+            }
         case .walkLeft:
             positionX -= delta
             if positionX <= 0 {
                 positionX = 0
-                chooseNextBehavior(preferred: .walkRight)
+                chooseNextBehavior(preferred: [
+                    PreferredBehaviorOption(.walkRight, chance: 0.30),
+                    PreferredBehaviorOption(.idle, chance: 1)
+                ])
             }
         case .walkRight:
             positionX += delta
             let maxX = maximumPositionX
             if positionX >= maxX {
                 positionX = maxX
-                chooseNextBehavior(preferred: .walkLeft)
+                chooseNextBehavior(preferred: [
+                    PreferredBehaviorOption(.walkLeft, chance: 0.30),
+                    PreferredBehaviorOption(.idle, chance: 1)
+                ])
             }
-        case .walkUp, .idle, .groom:
+        case .walkUp:
+            guard settings.enableVerticalMovement else { break }
+            positionY += delta
+            if positionY >= maximumPositionY {
+                positionY = maximumPositionY
+                chooseNextBehavior(preferred: [
+                    PreferredBehaviorOption(.walkDown, chance: 0.30),
+                    PreferredBehaviorOption(.idle, chance: 1)
+                ])
+            }
+        case .idle, .groom:
             break
         }
     }
 
     private func chooseNextBehavior(preferred: Behavior? = nil) {
+        let preferredBehaviors = preferred.map { [PreferredBehaviorOption($0)] } ?? []
+        chooseNextBehavior(preferred: preferredBehaviors)
+    }
+
+    private func chooseNextBehavior(preferred preferredBehaviors: [PreferredBehaviorOption]) {
         behaviorTimer?.invalidate()
 
         if let manualBehaviorOverride, isBehaviorEnabled(manualBehaviorOverride) {
@@ -209,31 +261,31 @@ final class PetEngine: ObservableObject {
             return
         }
 
-        let nextBehavior = nextAutomaticBehavior(preferred: preferred)
+        let nextBehavior = nextAutomaticBehavior(preferred: preferredBehaviors)
         transition(to: nextBehavior)
     }
 
-    private func nextAutomaticBehavior(preferred: Behavior? = nil) -> Behavior {
+    private func nextAutomaticBehavior(preferred preferredBehaviors: [PreferredBehaviorOption] = []) -> Behavior {
         if behavior == .idle, idlePlaybackState == .seated {
-            return nextBehaviorWhileSeated(preferred: preferred)
+            return nextBehaviorWhileSeated(preferred: preferredBehaviors)
         }
 
-        if let preferred, isBehaviorEnabled(preferred) {
-            return preferred
+        if let preferredBehavior = selectedPreferredBehavior(from: preferredBehaviors) {
+            return preferredBehavior
         }
 
         let availableBehaviors = automaticBehaviorPool()
         return availableBehaviors.randomElement() ?? .idle
     }
 
-    private func nextBehaviorWhileSeated(preferred: Behavior? = nil) -> Behavior {
-        if let preferred {
-            if preferred == .groom, isBehaviorEnabled(.groom) {
+    private func nextBehaviorWhileSeated(preferred preferredBehaviors: [PreferredBehaviorOption] = []) -> Behavior {
+        if let preferredBehavior = selectedPreferredBehavior(from: preferredBehaviors) {
+            if preferredBehavior == .groom, isBehaviorEnabled(.groom) {
                 return .groom
             }
 
-            if preferred != .idle, isBehaviorEnabled(preferred) {
-                return preferred
+            if preferredBehavior != .idle {
+                return preferredBehavior
             }
         }
 
@@ -248,6 +300,16 @@ final class PetEngine: ObservableObject {
         let standingBehaviors = [Behavior.walkDown, .walkLeft, .walkRight, .walkUp]
             .filter(isBehaviorEnabled)
         return standingBehaviors.randomElement() ?? .idle
+    }
+
+    private func selectedPreferredBehavior(from options: [PreferredBehaviorOption]) -> Behavior? {
+        for option in options where isBehaviorEnabled(option.behavior) {
+            if Double.random(in: 0 ... 1) < option.chance {
+                return option.behavior
+            }
+        }
+
+        return nil
     }
 
     private func automaticBehaviorPool() -> [Behavior] {
@@ -297,8 +359,26 @@ final class PetEngine: ObservableObject {
         max(0, screenFrame.width - contentSize.width)
     }
 
+    private var minimumPositionY: CGFloat {
+        clampedPositionY(settings.defaultYOffset - settings.verticalMovementRange / 2)
+    }
+
+    private var maximumPositionY: CGFloat {
+        clampedPositionY(settings.defaultYOffset + settings.verticalMovementRange / 2)
+    }
+
     private func clampPositionToVisibleRange() {
         positionX = min(max(positionX, 0), maximumPositionX)
+        if settings.enableVerticalMovement {
+            positionY = min(max(positionY, minimumPositionY), maximumPositionY)
+        } else {
+            positionY = clampedPositionY(settings.defaultYOffset)
+        }
+    }
+
+    private func clampedPositionY(_ proposedValue: Double) -> CGFloat {
+        let maxY = max(0, screenFrame.height - contentSize.height)
+        return min(max(CGFloat(proposedValue), 0), maxY)
     }
 
     private func reconcileBehaviorAvailability() {
@@ -348,7 +428,7 @@ final class PetEngine: ObservableObject {
             idlePlaybackState = .seated
             groomPlaybackState = .active
             remainingGroomLoops = Int.random(in: 1 ... 5)
-            currentFrameIndex = 0
+            currentFrameIndex = groomLoopStartIndex(for: spriteSheet.frames(for: .groom))
         } else {
             idlePlaybackState = .inactive
             groomPlaybackState = .inactive
@@ -476,12 +556,15 @@ final class PetEngine: ObservableObject {
     private func advanceGroomAnimationFrame(frames: [NSImage]) {
         guard !frames.isEmpty else { return }
 
+        let loopStart = groomLoopStartIndex(for: frames)
+        let loopEnd = groomLoopEndIndex(for: frames)
+
         switch groomPlaybackState {
         case .inactive:
-            currentFrameIndex = min(currentFrameIndex, frames.count - 1)
+            currentFrameIndex = min(max(currentFrameIndex, loopStart), loopEnd)
             updateFrameImage()
         case .active:
-            if currentFrameIndex < frames.count - 1 {
+            if currentFrameIndex < loopEnd {
                 currentFrameIndex += 1
                 updateFrameImage()
                 return
@@ -489,7 +572,7 @@ final class PetEngine: ObservableObject {
 
             if remainingGroomLoops > 1 {
                 remainingGroomLoops -= 1
-                currentFrameIndex = 0
+                currentFrameIndex = loopStart
                 updateFrameImage()
                 return
             }
@@ -498,6 +581,14 @@ final class PetEngine: ObservableObject {
             groomPlaybackState = .inactive
             applySeatedIdleHold()
         }
+    }
+
+    private func groomLoopStartIndex(for frames: [NSImage]) -> Int {
+        min(Self.groomLoopStartFrame, max(0, frames.count - 1))
+    }
+
+    private func groomLoopEndIndex(for frames: [NSImage]) -> Int {
+        max(groomLoopStartIndex(for: frames), min(Self.groomLoopEndFrame, frames.count - 1))
     }
 
     private func beginReturnToSeatedIdle(nextBehavior: Behavior) {
@@ -517,18 +608,24 @@ final class PetEngine: ObservableObject {
     }
 
     private func scheduleBehaviorTimer(for behavior: Behavior) {
+        if behavior == .groom {
+            behaviorTimer?.invalidate()
+            behaviorTimer = nil
+            return
+        }
+
         let duration: ClosedRange<Double>
         switch behavior {
         case .walkDown:
-            duration = 1.8 ... 3.0
+            duration = 1.0 ... 5.0
         case .walkLeft, .walkRight:
-            duration = 2.5 ... 5.0
+            duration = 1.0 ... 5.0
         case .walkUp:
-            duration = 1.8 ... 3.0
+            duration = 1.0 ... 5.0
         case .idle:
-            duration = 2.0 ... 4.0
+            duration = 1.0 ... 3.0
         case .groom:
-            duration = 0.6 ... 0.6
+            return
         }
 
         behaviorTimer?.invalidate()

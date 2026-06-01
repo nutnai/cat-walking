@@ -51,6 +51,12 @@ final class OverlayWindowController {
             }
             .store(in: &cancellables)
 
+        engine.$positionY
+            .sink { [weak self] _ in
+                self?.layoutWindow()
+            }
+            .store(in: &cancellables)
+
         engine.$contentSize
             .sink { [weak self] _ in
                 self?.layoutWindow()
@@ -70,7 +76,39 @@ final class OverlayWindowController {
             }
             .store(in: &cancellables)
 
+        settings.$selectedCatTemplate
+            .sink { [weak self] templateName in
+                guard let self else { return }
+                self.engine.reloadSpriteSheet(SpriteSheet.load(templateName: templateName))
+                self.layoutWindow()
+            }
+            .store(in: &cancellables)
+
         settings.$animationFPS
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$movementSpeed
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$enableVerticalMovement
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$defaultYOffset
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$verticalMovementRange
             .sink { [weak self] _ in
                 self?.engine.settingsDidChange()
             }
@@ -129,16 +167,16 @@ final class OverlayWindowController {
     }
 
     private func updateScreenFrame() {
-        let frame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 2560, height: 1600)
         engine.updateScreenFrame(frame)
     }
 
     private func layoutWindow() {
-        let screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 2560, height: 1600)
         let size = engine.contentSize
         let origin = CGPoint(
             x: screenFrame.minX + engine.positionX,
-            y: screenFrame.minY
+            y: screenFrame.minY + engine.positionY
         )
         let frame = CGRect(origin: origin, size: size)
         window.setFrame(frame, display: true)

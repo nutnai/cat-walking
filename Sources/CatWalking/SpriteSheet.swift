@@ -65,6 +65,8 @@ struct SpriteSheetConfiguration {
 }
 
 struct SpriteSheet {
+    static let defaultTemplateSelection = ""
+
     let configuration: SpriteSheetConfiguration
     let framesByRow: [[NSImage]]
     let frameSize: CGSize
@@ -101,6 +103,31 @@ struct SpriteSheet {
         return placeholder(configuration: configuration)
     }
 
+    static func load(templateName: String, configuration: SpriteSheetConfiguration = .default) -> SpriteSheet {
+        let trimmedTemplateName = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTemplateName.isEmpty {
+            return load(configuration: configuration)
+        }
+
+        return load(named: [trimmedTemplateName], configuration: configuration)
+    }
+
+    static func availableTemplateNames() -> [String] {
+        bundledImageNames()
+    }
+
+    static func displayName(for templateName: String) -> String {
+        let trimmedTemplateName = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTemplateName.isEmpty else {
+            return "Automatic"
+        }
+
+        return trimmedTemplateName
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .localizedCapitalized
+    }
+
     private static func loadImage(named name: String, configuration: SpriteSheetConfiguration) -> SpriteSheet? {
         guard let url = resourceURL(named: name),
               let image = NSImage(contentsOf: url),
@@ -121,13 +148,13 @@ struct SpriteSheet {
             }
         }
 
-        let maxFrameWidth = trimmedFramesByRow
+        let maxFrameWidth = frameRects
             .flatMap { $0 }
-            .map { Int($0.size.width) }
+            .map { Int($0.width) }
             .max() ?? 0
-        let maxFrameHeight = trimmedFramesByRow
+        let maxFrameHeight = frameRects
             .flatMap { $0 }
-            .map { Int($0.size.height) }
+            .map { Int($0.height) }
             .max() ?? 0
 
         guard maxFrameWidth > 0, maxFrameHeight > 0 else {
