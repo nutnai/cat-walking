@@ -7,6 +7,7 @@ final class AppSettings: ObservableObject {
     private enum Keys {
         static let selectedCatTemplate = "selectedCatTemplate"
         static let catScale = "catScale"
+        static let openAtLogin = "openAtLogin"
         static let enableSpeechBubble = "enableSpeechBubble"
         static let speechBubbleMessages = "speechBubbleMessages"
         static let speechBubbleChance = "speechBubbleChance"
@@ -37,6 +38,13 @@ final class AppSettings: ObservableObject {
 
     @Published var catScale: Double {
         didSet { defaults.set(catScale, forKey: Keys.catScale) }
+    }
+
+    @Published var openAtLogin: Bool {
+        didSet {
+            defaults.set(openAtLogin, forKey: Keys.openAtLogin)
+            LaunchAtLoginManager.shared.setEnabled(openAtLogin)
+        }
     }
 
     @Published var enableSpeechBubble: Bool {
@@ -182,6 +190,7 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         self.selectedCatTemplate = defaults.string(forKey: Keys.selectedCatTemplate) ?? SpriteSheet.defaultTemplateSelection
         self.catScale = defaults.object(forKey: Keys.catScale) as? Double ?? 0.4
+        self.openAtLogin = defaults.object(forKey: Keys.openAtLogin) as? Bool ?? LaunchAtLoginManager.shared.isEnabled
         self.enableSpeechBubble = defaults.object(forKey: Keys.enableSpeechBubble) as? Bool ?? true
         self.speechBubbleMessagesRaw = defaults.string(forKey: Keys.speechBubbleMessages) ?? "Meow\nPurr...\nHello!"
         self.speechBubbleChance = defaults.object(forKey: Keys.speechBubbleChance) as? Double ?? 0.05

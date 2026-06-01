@@ -59,6 +59,7 @@ struct SettingsView: View {
                 }
 
                 Toggle("Stay on Top", isOn: $settings.stayOnTop)
+                Toggle("Open at Login", isOn: $settings.openAtLogin)
             }
 
             Section("Speech Bubble") {
