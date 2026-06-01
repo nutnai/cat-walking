@@ -4,6 +4,12 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
 
+    private var appVersionText: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+        let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
+        return "Version \(shortVersion) (Build \(buildVersion))"
+    }
+
     private func speechBubbleMessageBinding(for index: Int) -> Binding<String> {
         Binding(
             get: {
@@ -60,6 +66,10 @@ struct SettingsView: View {
 
                 Toggle("Stay on Top", isOn: $settings.stayOnTop)
                 Toggle("Open at Login", isOn: $settings.openAtLogin)
+
+                Text(appVersionText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Speech Bubble") {
