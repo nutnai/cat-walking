@@ -45,9 +45,25 @@ The app calculates frame size automatically from the full image dimensions.
 
 ## Run from Terminal
 
-```bash
+````bash
 cd /Users/nutnai/code/temp/CatWalking
 swift run
+
+## Export Installer
+
+Build an app bundle and installer package with:
+
+```bash
+./scripts/export-installer.sh
+````
+
+That creates:
+
+- `dist/CatWalking-<version>.app`
+- `dist/CatWalking-<version>-Installer.pkg`
+
+The package is unsigned. On another Mac, Gatekeeper may require the user to right-click and open it, or allow it from System Settings.
+
 ```
 
 ## Behavior and settings
@@ -85,3 +101,4 @@ Available settings:
 If you want to change how slicing works, update `SpriteSheetConfiguration.default` in `Sources/CatWalking/SpriteSheet.swift`.
 
 If you later decide to use pre-sliced frames instead of a sheet, the cleanest change is to replace the `SpriteSheet.load(...)` implementation while keeping the `framesByRow` API the same.
+```
