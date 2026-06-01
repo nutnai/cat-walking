@@ -4,6 +4,22 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
 
+    private func speechBubbleMessageBinding(for index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard settings.speechBubbleMessages.indices.contains(index) else {
+                    return ""
+                }
+                return settings.speechBubbleMessages[index]
+            },
+            set: { settings.updateSpeechBubbleMessage(at: index, to: $0) }
+        )
+    }
+
+    private var speechBubbleMessages: [String] {
+        settings.speechBubbleMessages
+    }
+
     private var availableCatTemplates: [String] {
         [SpriteSheet.defaultTemplateSelection] + SpriteSheet.availableTemplateNames()
     }
@@ -43,6 +59,109 @@ struct SettingsView: View {
                 }
 
                 Toggle("Stay on Top", isOn: $settings.stayOnTop)
+            }
+
+            Section("Speech Bubble") {
+                Toggle("Enable Cat Speech", isOn: $settings.enableSpeechBubble)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Speech Chance")
+                        Spacer()
+                        Text(String(format: "%.0f%%", settings.speechBubbleChance * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.speechBubbleChance, in: 0 ... 1, step: 0.01)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Bubble Duration")
+                        Spacer()
+                        Text(String(format: "%.1f s", settings.speechBubbleDuration))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.speechBubbleDuration, in: 0.5 ... 10, step: 0.5)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Bubble Color")
+                        Spacer()
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(nsColor: settings.speechBubbleColor))
+                            .frame(width: 44, height: 24)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                            )
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Red")
+                            Spacer()
+                            Text(String(format: "%.0f%%", settings.speechBubbleColorRed * 100))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $settings.speechBubbleColorRed, in: 0 ... 1, step: 0.05)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Green")
+                            Spacer()
+                            Text(String(format: "%.0f%%", settings.speechBubbleColorGreen * 100))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $settings.speechBubbleColorGreen, in: 0 ... 1, step: 0.05)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Blue")
+                            Spacer()
+                            Text(String(format: "%.0f%%", settings.speechBubbleColorBlue * 100))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $settings.speechBubbleColorBlue, in: 0 ... 1, step: 0.05)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Speech Text List")
+                    Text("Add, edit, or delete phrases one by one.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(speechBubbleMessages.enumerated()), id: \.offset) { index, message in
+                            HStack(spacing: 4) {
+                                Text("\(index + 1).")
+                                    .frame(minWidth: 20, alignment: .leading)
+
+                                TextField(
+                                    "",
+                                    text: speechBubbleMessageBinding(for: index)
+                                )
+                                .textFieldStyle(.roundedBorder)
+
+                                Button(role: .destructive) {
+                                    settings.removeSpeechBubbleMessage(at: index)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+
+                        Button {
+                            settings.addSpeechBubbleMessage()
+                        } label: {
+                            Label("Add New Text", systemImage: "plus")
+                        }
+                    }
+                }
             }
 
             Section("Animation") {

@@ -6,6 +6,12 @@ import Foundation
 final class PetEngine: ObservableObject {
     private static let groomLoopStartFrame = 1
     private static let groomLoopEndFrame = 3
+    private static let speechBubbleSpacing: CGFloat = 1
+    private static let speechBubbleHorizontalPadding: CGFloat = 14
+    private static let speechBubbleVerticalPadding: CGFloat = 10
+    private static let speechBubbleMinimumWidth: CGFloat = 120
+    private static let speechBubbleMaximumWidthRatio: CGFloat = 2.4
+    private static let speechBubbleMinimumInterval: ClosedRange<Double> = 1.0 ... 3.0
 
     private struct PreferredBehaviorOption {
         let behavior: Behavior
@@ -57,16 +63,21 @@ final class PetEngine: ObservableObject {
 
     @Published private(set) var currentFrame: NSImage
     @Published private(set) var contentSize: CGSize
+    @Published private(set) var petSize: CGSize
     @Published private(set) var positionX: CGFloat
     @Published private(set) var positionY: CGFloat
     @Published private(set) var behavior: Behavior
     @Published private(set) var manualBehaviorOverride: Behavior?
+    @Published private(set) var speechBubbleText: String?
+    @Published private(set) var speechBubbleColor: NSColor
+    @Published private(set) var speechBubbleTextColor: NSColor
 
     private let settings: AppSettings
     private var spriteSheet: SpriteSheet
     private var animationTimer: Timer?
     private var movementTimer: Timer?
     private var behaviorTimer: Timer?
+    private var speechBubbleTimer: Timer?
     private var screenFrame: CGRect
     private var currentFrameIndex = 0
     private var idlePlaybackState: IdlePlaybackState = .inactive
@@ -76,24 +87,41 @@ final class PetEngine: ObservableObject {
     private var pendingBehaviorAfterIdleSit: Behavior?
 
     init(settings: AppSettings, spriteSheet: SpriteSheet) {
+        let initialPetSize = CGSize(
+            width: spriteSheet.frameSize.width * settings.catScale,
+            height: spriteSheet.frameSize.height * settings.catScale
+        )
+        let initialSpeechBubbleColor = settings.speechBubbleColor
+        let initialSpeechBubbleTextColor: NSColor = {
+            let convertedColor = initialSpeechBubbleColor.usingColorSpace(.deviceRGB) ?? initialSpeechBubbleColor
+            let brightness = ((convertedColor.redComponent * 299) + (convertedColor.greenComponent * 587) + (convertedColor.blueComponent * 114)) / 1000
+            return brightness > 0.6 ? .black : .white
+        }()
+
         self.settings = settings
         self.spriteSheet = spriteSheet
         self.screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 2560, height: 1600)
         self.behavior = .idle
         self.manualBehaviorOverride = nil
         self.currentFrame = spriteSheet.frames(for: .idle).first ?? NSImage(size: spriteSheet.frameSize)
-        self.contentSize = CGSize(width: spriteSheet.frameSize.width * settings.catScale, height: spriteSheet.frameSize.height * settings.catScale)
+        self.petSize = initialPetSize
+        self.contentSize = initialPetSize
         self.positionX = 0
         self.positionY = 0
+        self.speechBubbleText = nil
+        self.speechBubbleColor = initialSpeechBubbleColor
+        self.speechBubbleTextColor = initialSpeechBubbleTextColor
 
         positionX = max(0, (screenFrame.width - contentSize.width) / 2)
         positionY = clampedPositionY(settings.defaultYOffset)
+        refreshSpeechBubbleStyle()
     }
 
     func start() {
         refreshContentSize()
         restartAnimationTimer()
         restartMovementTimer()
+        restartSpeechBubbleCycle()
         chooseNextBehavior()
     }
 
@@ -101,6 +129,7 @@ final class PetEngine: ObservableObject {
         animationTimer?.invalidate()
         movementTimer?.invalidate()
         behaviorTimer?.invalidate()
+        speechBubbleTimer?.invalidate()
     }
 
     func updateScreenFrame(_ newFrame: CGRect) {
@@ -109,8 +138,10 @@ final class PetEngine: ObservableObject {
     }
 
     func settingsDidChange() {
+        refreshSpeechBubbleStyle()
         refreshContentSize()
         restartAnimationTimer()
+        restartSpeechBubbleCycle()
         reconcileBehaviorAvailability()
     }
 
@@ -151,12 +182,123 @@ final class PetEngine: ObservableObject {
     }
 
     private func refreshContentSize() {
-        contentSize = CGSize(
+        petSize = CGSize(
             width: spriteSheet.frameSize.width * settings.catScale,
             height: spriteSheet.frameSize.height * settings.catScale
         )
+        let bubbleSize = speechBubbleSize(for: speechBubbleText)
+        contentSize = CGSize(
+            width: max(petSize.width, bubbleSize.width),
+            height: petSize.height + (bubbleSize.height > 0 ? bubbleSize.height + Self.speechBubbleSpacing : 0)
+        )
         clampPositionToVisibleRange()
         updateFrameImage()
+    }
+
+    private func refreshSpeechBubbleStyle() {
+        speechBubbleColor = settings.speechBubbleColor
+        speechBubbleTextColor = preferredTextColor(for: speechBubbleColor)
+    }
+
+    private func restartSpeechBubbleCycle() {
+        speechBubbleTimer?.invalidate()
+
+        guard settings.enableSpeechBubble,
+              !settings.speechBubbleMessages.isEmpty
+        else {
+            if speechBubbleText != nil {
+                speechBubbleText = nil
+                refreshContentSize()
+            }
+            return
+        }
+
+        if speechBubbleText != nil {
+            scheduleNextSpeechBubbleEvent(after: max(0.5, settings.speechBubbleDuration))
+        } else {
+            scheduleNextSpeechBubbleEvent(after: Double.random(in: Self.speechBubbleMinimumInterval))
+        }
+    }
+
+    private func scheduleNextSpeechBubbleEvent(after interval: Double) {
+        speechBubbleTimer?.invalidate()
+        speechBubbleTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.advanceSpeechBubbleCycle()
+            }
+        }
+        RunLoop.main.add(speechBubbleTimer!, forMode: .common)
+    }
+
+    private func advanceSpeechBubbleCycle() {
+        if speechBubbleText != nil {
+            hideSpeechBubble()
+            return
+        }
+
+        showRandomSpeechBubble()
+    }
+
+    private func showRandomSpeechBubble() {
+        guard settings.enableSpeechBubble else {
+            speechBubbleText = nil
+            refreshContentSize()
+            return
+        }
+
+        let clampedChance = min(max(settings.speechBubbleChance, 0), 1)
+        guard Double.random(in: 0 ... 1) <= clampedChance else {
+            scheduleNextSpeechBubbleEvent(after: Double.random(in: Self.speechBubbleMinimumInterval))
+            return
+        }
+
+        guard let message = settings.speechBubbleMessages.randomElement() else {
+            speechBubbleText = nil
+            refreshContentSize()
+            return
+        }
+
+        speechBubbleText = message
+        refreshContentSize()
+        scheduleNextSpeechBubbleEvent(after: max(0.5, settings.speechBubbleDuration))
+    }
+
+    private func hideSpeechBubble() {
+        speechBubbleText = nil
+        refreshContentSize()
+        scheduleNextSpeechBubbleEvent(after: Double.random(in: Self.speechBubbleMinimumInterval))
+    }
+
+    private func speechBubbleSize(for text: String?) -> CGSize {
+        guard let text, !text.isEmpty else {
+            return .zero
+        }
+
+        let maxWidth = max(
+            Self.speechBubbleMinimumWidth,
+            min(screenFrame.width * 0.5, petSize.width * Self.speechBubbleMaximumWidthRatio)
+        )
+        let textSize = NSString(string: text).boundingRect(
+            with: CGSize(
+                width: maxWidth - (Self.speechBubbleHorizontalPadding * 2),
+                height: .greatestFiniteMagnitude
+            ),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [
+                .font: NSFont.systemFont(ofSize: max(13, settings.catScale * 12), weight: .medium)
+            ]
+        ).integral.size
+
+        return CGSize(
+            width: min(maxWidth, textSize.width + (Self.speechBubbleHorizontalPadding * 2)),
+            height: max(34, textSize.height + (Self.speechBubbleVerticalPadding * 2) + 10)
+        )
+    }
+
+    private func preferredTextColor(for bubbleColor: NSColor) -> NSColor {
+        let convertedColor = bubbleColor.usingColorSpace(.deviceRGB) ?? bubbleColor
+        let brightness = ((convertedColor.redComponent * 299) + (convertedColor.greenComponent * 587) + (convertedColor.blueComponent * 114)) / 1000
+        return brightness > 0.6 ? .black : .white
     }
 
     private func restartAnimationTimer() {
@@ -289,12 +431,14 @@ final class PetEngine: ObservableObject {
             }
         }
 
-        if isBehaviorEnabled(.idle), Double.random(in: 0 ... 1) < seatedIdleHoldChance {
-            return .idle
-        }
+        
 
-        if isBehaviorEnabled(.groom), Bool.random() {
-            return .groom
+        if isBehaviorEnabled(.idle), Double.random(in: 0 ... 1) < seatedIdleHoldChance {
+            if isBehaviorEnabled(.groom), Bool.random() {
+                return .groom
+            }
+
+                return .idle
         }
 
         let standingBehaviors = [Behavior.walkDown, .walkLeft, .walkRight, .walkUp]
@@ -323,9 +467,8 @@ final class PetEngine: ObservableObject {
 
         var weightedBehaviors: [Behavior] = []
 
-        if isBehaviorEnabled(.idle) {
-            let idleWeight = max(1, Int(round(settings.sitPreference * 6)))
-            weightedBehaviors.append(contentsOf: Array(repeating: .idle, count: idleWeight))
+        if isBehaviorEnabled(.idle) && seatedIdleHoldChance != 0 {
+            weightedBehaviors.append(.idle)
         }
 
         if isBehaviorEnabled(.walkLeft) {
@@ -344,15 +487,13 @@ final class PetEngine: ObservableObject {
             weightedBehaviors.append(.walkUp)
         }
 
-        if isBehaviorEnabled(.groom) {
-            weightedBehaviors.append(.groom)
-        }
+        // groom handle in idle
 
         return weightedBehaviors
     }
 
     private var seatedIdleHoldChance: Double {
-        min(max(0.25 + settings.sitPreference * 0.5, 0), 0.95)
+        min(max(settings.sitPreference, 0), 1)
     }
 
     private var maximumPositionX: CGFloat {

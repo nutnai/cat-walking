@@ -76,6 +76,48 @@ final class OverlayWindowController {
             }
             .store(in: &cancellables)
 
+        settings.$enableSpeechBubble
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$speechBubbleMessagesRaw
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$speechBubbleChance
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$speechBubbleDuration
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$speechBubbleColorRed
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$speechBubbleColorGreen
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$speechBubbleColorBlue
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
         settings.$selectedCatTemplate
             .sink { [weak self] templateName in
                 guard let self else { return }
