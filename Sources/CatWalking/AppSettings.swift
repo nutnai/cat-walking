@@ -4,6 +4,36 @@ import Combine
 @MainActor
 final class AppSettings: ObservableObject {
 
+    enum BehaviorPreset: String, CaseIterable, Identifiable {
+        case naughty
+        case normal
+        case lazy
+        case custom
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .naughty:
+                return "Naughty"
+            case .normal:
+                return "Normal"
+            case .lazy:
+                return "Lazy"
+            case .custom:
+                return "Custom"
+            }
+        }
+    }
+
+    private struct AnimationProfile {
+        let animationFPS: Double
+        let movementSpeed: Double
+        let sitPreference: Double
+        let sleepFrequency: Double
+        let lazyPercentage: Double
+    }
+
     private enum Keys {
         static let selectedCatTemplate = "selectedCatTemplate"
         static let catScale = "catScale"
@@ -31,9 +61,17 @@ final class AppSettings: ObservableObject {
         static let enableIdle = "enableIdle"
         static let enableGroom = "enableGroom"
         static let enableSleep = "enableSleep"
+        static let behaviorPreset = "behaviorPreset"
+
+        static let customAnimationFPS = "customAnimationFPS"
+        static let customMovementSpeed = "customMovementSpeed"
+        static let customSitPreference = "customSitPreference"
+        static let customSleepFrequency = "customSleepFrequency"
+        static let customLazyPercentage = "customLazyPercentage"
     }
 
     private let defaults: UserDefaults
+    private var customAnimationProfile: AnimationProfile
 
     @Published var selectedCatTemplate: String {
         didSet { defaults.set(selectedCatTemplate, forKey: Keys.selectedCatTemplate) }
@@ -79,11 +117,17 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var animationFPS: Double {
-        didSet { defaults.set(animationFPS, forKey: Keys.animationFPS) }
+        didSet {
+            defaults.set(animationFPS, forKey: Keys.animationFPS)
+            syncCustomAnimationProfileIfNeeded()
+        }
     }
 
     @Published var movementSpeed: Double {
-        didSet { defaults.set(movementSpeed, forKey: Keys.movementSpeed) }
+        didSet {
+            defaults.set(movementSpeed, forKey: Keys.movementSpeed)
+            syncCustomAnimationProfileIfNeeded()
+        }
     }
 
     @Published var enableVerticalMovement: Bool {
@@ -105,15 +149,24 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var sitPreference: Double {
-        didSet { defaults.set(sitPreference, forKey: Keys.sitPreference) }
+        didSet {
+            defaults.set(sitPreference, forKey: Keys.sitPreference)
+            syncCustomAnimationProfileIfNeeded()
+        }
     }
 
     @Published var sleepFrequency: Double {
-        didSet { defaults.set(sleepFrequency, forKey: Keys.sleepFrequency) }
+        didSet {
+            defaults.set(sleepFrequency, forKey: Keys.sleepFrequency)
+            syncCustomAnimationProfileIfNeeded()
+        }
     }
 
     @Published var lazyPercentage: Double {
-        didSet { defaults.set(lazyPercentage, forKey: Keys.lazyPercentage) }
+        didSet {
+            defaults.set(lazyPercentage, forKey: Keys.lazyPercentage)
+            syncCustomAnimationProfileIfNeeded()
+        }
     }
 
     @Published var stayOnTop: Bool {
@@ -121,31 +174,56 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var enableWalkDown: Bool {
-        didSet { defaults.set(enableWalkDown, forKey: Keys.enableWalkDown) }
+        didSet {
+            defaults.set(enableWalkDown, forKey: Keys.enableWalkDown)
+        }
     }
 
     @Published var enableWalkLeft: Bool {
-        didSet { defaults.set(enableWalkLeft, forKey: Keys.enableWalkLeft) }
+        didSet {
+            defaults.set(enableWalkLeft, forKey: Keys.enableWalkLeft)
+        }
     }
 
     @Published var enableWalkRight: Bool {
-        didSet { defaults.set(enableWalkRight, forKey: Keys.enableWalkRight) }
+        didSet {
+            defaults.set(enableWalkRight, forKey: Keys.enableWalkRight)
+        }
     }
 
     @Published var enableWalkUp: Bool {
-        didSet { defaults.set(enableWalkUp, forKey: Keys.enableWalkUp) }
+        didSet {
+            defaults.set(enableWalkUp, forKey: Keys.enableWalkUp)
+        }
     }
 
     @Published var enableIdle: Bool {
-        didSet { defaults.set(enableIdle, forKey: Keys.enableIdle) }
+        didSet {
+            defaults.set(enableIdle, forKey: Keys.enableIdle)
+        }
     }
 
     @Published var enableGroom: Bool {
-        didSet { defaults.set(enableGroom, forKey: Keys.enableGroom) }
+        didSet {
+            defaults.set(enableGroom, forKey: Keys.enableGroom)
+        }
     }
 
     @Published var enableSleep: Bool {
-        didSet { defaults.set(enableSleep, forKey: Keys.enableSleep) }
+        didSet {
+            defaults.set(enableSleep, forKey: Keys.enableSleep)
+        }
+    }
+
+    @Published var behaviorPreset: BehaviorPreset {
+        didSet {
+            defaults.set(behaviorPreset.rawValue, forKey: Keys.behaviorPreset)
+            applyBehaviorPresetTransition(from: oldValue, to: behaviorPreset)
+        }
+    }
+
+    var isCustomBehaviorPreset: Bool {
+        behaviorPreset == .custom
     }
 
     var speechBubbleMessages: [String] {
@@ -229,10 +307,117 @@ final class AppSettings: ObservableObject {
         self.enableIdle = defaults.object(forKey: Keys.enableIdle) as? Bool ?? true
         self.enableGroom = defaults.object(forKey: Keys.enableGroom) as? Bool ?? true
         self.enableSleep = defaults.object(forKey: Keys.enableSleep) as? Bool ?? true
+        self.behaviorPreset = BehaviorPreset(rawValue: defaults.string(forKey: Keys.behaviorPreset) ?? "") ?? .custom
+        self.customAnimationProfile = AnimationProfile(
+            animationFPS: defaults.object(forKey: Keys.customAnimationFPS) as? Double ?? (defaults.object(forKey: Keys.animationFPS) as? Double ?? 4.0),
+            movementSpeed: defaults.object(forKey: Keys.customMovementSpeed) as? Double ?? (defaults.object(forKey: Keys.movementSpeed) as? Double ?? 80.0),
+            sitPreference: defaults.object(forKey: Keys.customSitPreference) as? Double ?? (defaults.object(forKey: Keys.sitPreference) as? Double ?? 0.5),
+            sleepFrequency: defaults.object(forKey: Keys.customSleepFrequency) as? Double ?? (defaults.object(forKey: Keys.sleepFrequency) as? Double ?? 0.5),
+            lazyPercentage: defaults.object(forKey: Keys.customLazyPercentage) as? Double ?? (defaults.object(forKey: Keys.lazyPercentage) as? Double ?? 0.3)
+        )
 
         if !enableVerticalMovement {
             enableWalkDown = false
             enableWalkUp = false
+        }
+
+        applyBehaviorPresetOnLaunch()
+    }
+
+    private func applyBehaviorPresetOnLaunch() {
+        if behaviorPreset == .custom {
+            applyAnimationProfile(customAnimationProfile)
+            return
+        }
+
+        if let profile = presetProfile(for: behaviorPreset) {
+            applyAnimationProfile(profile)
+        }
+    }
+
+    private func applyBehaviorPresetTransition(from oldValue: BehaviorPreset, to newValue: BehaviorPreset) {
+        guard oldValue != newValue else {
+            return
+        }
+
+        if oldValue == .custom {
+            customAnimationProfile = captureCurrentAnimationProfile()
+            persistCustomAnimationProfile(customAnimationProfile)
+        }
+
+        if newValue == .custom {
+            applyAnimationProfile(customAnimationProfile)
+            return
+        }
+
+        if let profile = presetProfile(for: newValue) {
+            applyAnimationProfile(profile)
+        }
+    }
+
+    private func syncCustomAnimationProfileIfNeeded() {
+        guard behaviorPreset == .custom else {
+            return
+        }
+
+        customAnimationProfile = captureCurrentAnimationProfile()
+        persistCustomAnimationProfile(customAnimationProfile)
+    }
+
+    private func captureCurrentAnimationProfile() -> AnimationProfile {
+        AnimationProfile(
+            animationFPS: animationFPS,
+            movementSpeed: movementSpeed,
+            sitPreference: sitPreference,
+            sleepFrequency: sleepFrequency,
+            lazyPercentage: lazyPercentage
+        )
+    }
+
+    private func persistCustomAnimationProfile(_ profile: AnimationProfile) {
+        defaults.set(profile.animationFPS, forKey: Keys.customAnimationFPS)
+        defaults.set(profile.movementSpeed, forKey: Keys.customMovementSpeed)
+        defaults.set(profile.sitPreference, forKey: Keys.customSitPreference)
+        defaults.set(profile.sleepFrequency, forKey: Keys.customSleepFrequency)
+        defaults.set(profile.lazyPercentage, forKey: Keys.customLazyPercentage)
+    }
+
+    private func applyAnimationProfile(_ profile: AnimationProfile) {
+        animationFPS = profile.animationFPS
+        movementSpeed = profile.movementSpeed
+        sitPreference = profile.sitPreference
+        sleepFrequency = profile.sleepFrequency
+        lazyPercentage = profile.lazyPercentage
+    }
+
+    private func presetProfile(for preset: BehaviorPreset) -> AnimationProfile? {
+        switch preset {
+        case .naughty:
+            return AnimationProfile(
+                animationFPS: 8,
+                movementSpeed: 220,
+                sitPreference: 0.12,
+                sleepFrequency: 0.08,
+                lazyPercentage: 0.05
+            )
+        case .normal:
+            return AnimationProfile(
+                animationFPS: 5,
+                movementSpeed: 110,
+                sitPreference: 0.5,
+                sleepFrequency: 0.35,
+                lazyPercentage: 0.35
+            )
+        case .lazy:
+            return AnimationProfile(
+                animationFPS: 4,
+                movementSpeed: 55,
+                sitPreference: 0.88,
+                sleepFrequency: 0.75,
+                lazyPercentage: 0.9
+            )
+        case .custom:
+            return nil
         }
     }
 }

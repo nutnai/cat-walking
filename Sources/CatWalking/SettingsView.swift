@@ -4,6 +4,10 @@ import AppKit
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
 
+    private var isAnimationPresetLocked: Bool {
+        !settings.isCustomBehaviorPreset
+    }
+
     private var appVersionText: String {
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
         let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
@@ -176,6 +180,19 @@ struct SettingsView: View {
             }
 
             Section("Animation") {
+                Picker("Behavior Preset", selection: $settings.behaviorPreset) {
+                    ForEach(AppSettings.BehaviorPreset.allCases) { preset in
+                        Text(preset.displayName)
+                            .tag(preset)
+                    }
+                }
+
+                if isAnimationPresetLocked {
+                    Text("This preset controls animation tuning values only. Vertical and animation-enable settings stay editable.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Animation Speed")
@@ -185,6 +202,7 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.animationFPS, in: 4 ... 8, step: 1)
                 }
+                .disabled(isAnimationPresetLocked)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -195,6 +213,7 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.movementSpeed, in: 30 ... 260, step: 5)
                 }
+                .disabled(isAnimationPresetLocked)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -205,6 +224,7 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.sitPreference, in: 0 ... 1, step: 0.05)
                 }
+                .disabled(isAnimationPresetLocked)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -215,6 +235,7 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.sleepFrequency, in: 0 ... 1, step: 0.05)
                 }
+                .disabled(isAnimationPresetLocked)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -225,7 +246,10 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.lazyPercentage, in: 0 ... 1, step: 0.05)
                 }
+                .disabled(isAnimationPresetLocked)
+            }
 
+            Section("Vertical Movement") {
                 Toggle("Enable Move Up and Down", isOn: $settings.enableVerticalMovement)
 
                 HStack {
@@ -258,11 +282,13 @@ struct SettingsView: View {
             }
 
             Section("Enabled Animations") {
-                Toggle("Walk Left", isOn: $settings.enableWalkLeft)
-                Toggle("Walk Right", isOn: $settings.enableWalkRight)
-                Toggle("Idle", isOn: $settings.enableIdle)
-                Toggle("Groom", isOn: $settings.enableGroom)
-                Toggle("Sleep", isOn: $settings.enableSleep)
+                Group {
+                    Toggle("Walk Left", isOn: $settings.enableWalkLeft)
+                    Toggle("Walk Right", isOn: $settings.enableWalkRight)
+                    Toggle("Idle", isOn: $settings.enableIdle)
+                    Toggle("Groom", isOn: $settings.enableGroom)
+                    Toggle("Sleep", isOn: $settings.enableSleep)
+                }
 
                 Text("If every automatic animation is disabled, the app still uses idle as a safe fallback so the pet stays visible.")
                     .font(.footnote)
