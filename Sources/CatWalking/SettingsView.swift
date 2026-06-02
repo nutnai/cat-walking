@@ -46,6 +46,15 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("System") {
+                Toggle("Stay on Top", isOn: $settings.stayOnTop)
+                Toggle("Open at Login", isOn: $settings.openAtLogin)
+
+                Text(appVersionText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Appearance") {
                 Picker("Cat Template", selection: $settings.selectedCatTemplate) {
                     ForEach(availableCatTemplates, id: \.self) { templateName in
@@ -67,13 +76,6 @@ struct SettingsView: View {
                         step: 0.1
                     )
                 }
-
-                Toggle("Stay on Top", isOn: $settings.stayOnTop)
-                Toggle("Open at Login", isOn: $settings.openAtLogin)
-
-                Text(appVersionText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Speech Bubble") {

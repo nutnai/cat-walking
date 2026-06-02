@@ -50,9 +50,9 @@ struct CatWalkingApp: App {
     @StateObject private var engine = AppContainer.shared.engine
 
     var body: some Scene {
-        MenuBarExtra("Calico Cat", systemImage: "cat") {
+        MenuBarExtra("Cat Walking", systemImage: "cat") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Calico Cat")
+                Text("Cat Walking")
                     .font(.headline)
 
                 Text("Use Settings to change size, speed, and enabled animations.")
@@ -66,8 +66,6 @@ struct CatWalkingApp: App {
                 SettingsLink {
                     Text("Open Settings...")
                 }
-
-                Toggle("Stay on Top", isOn: $settings.stayOnTop)
 
                 Divider()
 

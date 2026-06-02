@@ -1,0 +1,24 @@
+{
+  "rows": 8,
+  "columns": 4,
+  "rowOrder": "topToBottom",
+  "animationMapping": {
+    "walkDown": 0,
+    "walkRight": 1,
+    "walkUp": 2,
+    "walkLeft": 3,
+    "idle": 4,
+    "groom": 5,
+    "layDown": 6,
+    "sleep": {
+      "row": 7,
+      "startColumn": 0,
+      "endColumn": 1
+    },
+    "extraTwo": {
+      "row": 7,
+      "startColumn": 2,
+      "endColumn": 3
+    }
+  }
+}
