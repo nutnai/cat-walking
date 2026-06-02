@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+#if DEBUG
         if ProcessInfo.processInfo.environment["CATWALKING_RUN_STATE_CHECKS"] == "1" {
             do {
                 try PetEngineStateChecks.run()
@@ -29,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+#endif
 
         let container = AppContainer.shared
         let overlayController = OverlayWindowController(engine: container.engine, settings: container.settings)

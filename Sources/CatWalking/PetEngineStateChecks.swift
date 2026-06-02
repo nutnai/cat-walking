@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import Foundation
 
@@ -158,3 +159,4 @@ enum PetEngineStateChecks {
         )
     }
 }
+#endif
