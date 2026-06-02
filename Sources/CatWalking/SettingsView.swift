@@ -59,7 +59,7 @@ struct SettingsView: View {
                     }
                     Slider(
                         value: $settings.catScale,
-                        in: 0.1 ... 2.0,
+                        in: 0.1 ... 10.0,
                         step: 0.1
                     )
                 }
@@ -206,6 +206,26 @@ struct SettingsView: View {
                     Slider(value: $settings.sitPreference, in: 0 ... 1, step: 0.05)
                 }
 
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Sleep Frequency")
+                        Spacer()
+                        Text(String(format: "%.0f%%", settings.sleepFrequency * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.sleepFrequency, in: 0 ... 1, step: 0.05)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Lazy Percentage")
+                        Spacer()
+                        Text(String(format: "%.0f%%", settings.lazyPercentage * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $settings.lazyPercentage, in: 0 ... 1, step: 0.05)
+                }
+
                 Toggle("Enable Move Up and Down", isOn: $settings.enableVerticalMovement)
 
                 HStack {
@@ -242,8 +262,9 @@ struct SettingsView: View {
                 Toggle("Walk Right", isOn: $settings.enableWalkRight)
                 Toggle("Idle", isOn: $settings.enableIdle)
                 Toggle("Groom", isOn: $settings.enableGroom)
+                Toggle("Sleep", isOn: $settings.enableSleep)
 
-                Text("If all animations are disabled, the app falls back to idle.")
+                Text("If every automatic animation is disabled, the app still uses idle as a safe fallback so the pet stays visible.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

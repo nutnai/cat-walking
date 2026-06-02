@@ -162,6 +162,18 @@ final class OverlayWindowController {
             }
             .store(in: &cancellables)
 
+        settings.$sleepFrequency
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$lazyPercentage
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
         settings.$enableWalkLeft
             .sink { [weak self] _ in
                 self?.engine.settingsDidChange()
@@ -193,6 +205,12 @@ final class OverlayWindowController {
             .store(in: &cancellables)
 
         settings.$enableGroom
+            .sink { [weak self] _ in
+                self?.engine.settingsDidChange()
+            }
+            .store(in: &cancellables)
+
+        settings.$enableSleep
             .sink { [weak self] _ in
                 self?.engine.settingsDidChange()
             }

@@ -1,13 +1,16 @@
 import AppKit
 import Foundation
 
-enum SpriteSequence: CaseIterable {
+enum SpriteSequence: String, CaseIterable, Codable {
     case walkDown
     case walkRight
     case walkUp
     case walkLeft
     case idle
     case groom
+    case layDown
+    case sleep
+    case extraTwo
 }
 
 enum SpriteSheetRowOrder {
@@ -15,37 +18,158 @@ enum SpriteSheetRowOrder {
     case bottomToTop
 }
 
+extension SpriteSheetRowOrder: Codable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+
+        switch value {
+        case "topToBottom":
+            self = .topToBottom
+        case "bottomToTop":
+            self = .bottomToTop
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported rowOrder: \(value)"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .topToBottom:
+            try container.encode("topToBottom")
+        case .bottomToTop:
+            try container.encode("bottomToTop")
+        }
+    }
+}
+
+struct SpriteSequenceSelection {
+    let row: Int
+    let startColumn: Int
+    let endColumn: Int?
+
+    init(row: Int, startColumn: Int = 0, endColumn: Int? = nil) {
+        self.row = row
+        self.startColumn = startColumn
+        self.endColumn = endColumn
+    }
+
+    func slice(frames: [NSImage]) -> [NSImage] {
+        guard !frames.isEmpty else {
+            return []
+        }
+
+        let lowerBound = min(max(0, startColumn), frames.count - 1)
+        let upperBound = min(max(endColumn ?? (frames.count - 1), lowerBound), frames.count - 1)
+        return Array(frames[lowerBound ... upperBound])
+    }
+}
+
+extension SpriteSequenceSelection: Codable {
+    enum CodingKeys: String, CodingKey {
+        case row
+        case startColumn
+        case endColumn
+    }
+
+    init(from decoder: Decoder) throws {
+        if let singleValueContainer = try? decoder.singleValueContainer(),
+           let row = try? singleValueContainer.decode(Int.self) {
+            self.init(row: row)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            row: try container.decode(Int.self, forKey: .row),
+            startColumn: try container.decodeIfPresent(Int.self, forKey: .startColumn) ?? 0,
+            endColumn: try container.decodeIfPresent(Int.self, forKey: .endColumn)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        if startColumn == 0, endColumn == nil {
+            var singleValueContainer = encoder.singleValueContainer()
+            try singleValueContainer.encode(row)
+            return
+        }
+
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(row, forKey: .row)
+        try container.encode(startColumn, forKey: .startColumn)
+        try container.encodeIfPresent(endColumn, forKey: .endColumn)
+    }
+}
+
 struct SpriteSheetAnimationMapping {
-    let walkDownRow: Int
-    let walkRightRow: Int
-    let walkUpRow: Int
-    let walkLeftRow: Int
-    let idleRow: Int
-    let groomRow: Int
+    private let selections: [SpriteSequence: SpriteSequenceSelection]
+
+    init(selections: [SpriteSequence: SpriteSequenceSelection]) {
+        self.selections = selections
+    }
 
     static let `default` = SpriteSheetAnimationMapping(
-        walkDownRow: 0,
-        walkRightRow: 1,
-        walkUpRow: 2,
-        walkLeftRow: 3,
-        idleRow: 4,
-        groomRow: 5
+        selections: [
+            .walkDown: SpriteSequenceSelection(row: 0),
+            .walkRight: SpriteSequenceSelection(row: 1),
+            .walkUp: SpriteSequenceSelection(row: 2),
+            .walkLeft: SpriteSequenceSelection(row: 3),
+            .idle: SpriteSequenceSelection(row: 4),
+            .groom: SpriteSequenceSelection(row: 5)
+        ]
     )
 
-    func rowIndex(for sequence: SpriteSequence) -> Int {
-        switch sequence {
-        case .walkDown:
-            return walkDownRow
-        case .walkRight:
-            return walkRightRow
-        case .walkUp:
-            return walkUpRow
-        case .walkLeft:
-            return walkLeftRow
-        case .idle:
-            return idleRow
-        case .groom:
-            return groomRow
+    func selection(for sequence: SpriteSequence) -> SpriteSequenceSelection? {
+        selections[sequence]
+    }
+}
+
+extension SpriteSheetAnimationMapping: Codable {
+    private struct DynamicCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+            intValue = nil
+        }
+
+        init?(intValue: Int) {
+            return nil
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        var selections: [SpriteSequence: SpriteSequenceSelection] = [:]
+
+        for key in container.allKeys {
+            guard let sequence = SpriteSequence(rawValue: key.stringValue) else {
+                continue
+            }
+
+            if let selection = try? container.decode(SpriteSequenceSelection.self, forKey: key) {
+                selections[sequence] = selection
+            }
+        }
+
+        self.init(selections: selections)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: DynamicCodingKey.self)
+        for sequence in SpriteSequence.allCases {
+            guard let selection = selections[sequence],
+                  let key = DynamicCodingKey(stringValue: sequence.rawValue)
+            else {
+                continue
+            }
+
+            try container.encode(selection, forKey: key)
         }
     }
 }
@@ -64,6 +188,8 @@ struct SpriteSheetConfiguration {
     )
 }
 
+extension SpriteSheetConfiguration: Codable {}
+
 struct SpriteSheet {
     static let defaultTemplateSelection = ""
 
@@ -77,11 +203,13 @@ struct SpriteSheet {
     }
 
     func frames(for sequence: SpriteSequence) -> [NSImage] {
-        let rowIndex = configuration.animationMapping.rowIndex(for: sequence)
-        guard framesByRow.indices.contains(rowIndex) else {
+        guard let selection = configuration.animationMapping.selection(for: sequence),
+              framesByRow.indices.contains(selection.row)
+        else {
             return []
         }
-        return framesByRow[rowIndex]
+
+        return selection.slice(frames: framesByRow[selection.row])
     }
 
     static func load(
@@ -89,13 +217,13 @@ struct SpriteSheet {
         configuration: SpriteSheetConfiguration = .default
     ) -> SpriteSheet {
         for name in preferredNames {
-            if let spriteSheet = loadImage(named: name, configuration: configuration) {
+            if let spriteSheet = loadImage(named: name, fallbackConfiguration: configuration) {
                 return spriteSheet
             }
         }
 
         for fallbackName in bundledImageNames() {
-            if let spriteSheet = loadImage(named: fallbackName, configuration: configuration) {
+            if let spriteSheet = loadImage(named: fallbackName, fallbackConfiguration: configuration) {
                 return spriteSheet
             }
         }
@@ -128,13 +256,15 @@ struct SpriteSheet {
             .localizedCapitalized
     }
 
-    private static func loadImage(named name: String, configuration: SpriteSheetConfiguration) -> SpriteSheet? {
+    private static func loadImage(named name: String, fallbackConfiguration: SpriteSheetConfiguration) -> SpriteSheet? {
         guard let url = resourceURL(named: name),
               let image = NSImage(contentsOf: url),
               let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
         else {
             return nil
         }
+
+        let configuration = loadConfiguration(named: name) ?? fallbackConfiguration
 
         guard let frameRects = detectedFrameRects(in: cgImage, configuration: configuration)
             ?? evenlyDividedFrameRects(in: cgImage, configuration: configuration)
@@ -191,6 +321,35 @@ struct SpriteSheet {
             let nsName = candidate as NSString
             let baseName = nsName.deletingPathExtension
             let ext = nsName.pathExtension.isEmpty ? nil : nsName.pathExtension
+            if let url = Bundle.module.url(forResource: baseName, withExtension: ext) {
+                return url
+            }
+        }
+
+        return nil
+    }
+
+    private static func loadConfiguration(named name: String) -> SpriteSheetConfiguration? {
+        guard let url = configurationURL(named: name) else {
+            return nil
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode(SpriteSheetConfiguration.self, from: data)
+        } catch {
+            NSLog("Failed to load sprite configuration for %@: %@", name, error.localizedDescription)
+            return nil
+        }
+    }
+
+    private static func configurationURL(named name: String) -> URL? {
+        let candidateNames = [name, "\(name).json"]
+
+        for candidate in candidateNames {
+            let nsName = candidate as NSString
+            let baseName = nsName.deletingPathExtension
+            let ext = nsName.pathExtension.isEmpty ? "json" : nsName.pathExtension
             if let url = Bundle.module.url(forResource: baseName, withExtension: ext) {
                 return url
             }

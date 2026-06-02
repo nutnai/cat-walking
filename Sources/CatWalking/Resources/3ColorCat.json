@@ -1,0 +1,13 @@
+{
+  "rows": 6,
+  "columns": 4,
+  "rowOrder": "topToBottom",
+  "animationMapping": {
+    "walkDown": 0,
+    "walkRight": 1,
+    "walkUp": 2,
+    "walkLeft": 3,
+    "idle": 4,
+    "groom": 5
+  }
+}

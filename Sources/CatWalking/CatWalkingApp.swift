@@ -19,6 +19,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        if ProcessInfo.processInfo.environment["CATWALKING_RUN_STATE_CHECKS"] == "1" {
+            do {
+                try PetEngineStateChecks.run()
+            } catch {
+                NSLog("PetEngine state checks failed: %@", String(describing: error))
+            }
+
+            NSApp.terminate(nil)
+            return
+        }
+
         let container = AppContainer.shared
         let overlayController = OverlayWindowController(engine: container.engine, settings: container.settings)
         self.overlayController = overlayController
@@ -86,6 +97,24 @@ struct CatWalkingApp: App {
 
                 Button("Test Groom") {
                     engine.setManualBehaviorOverride(.groom)
+                }
+
+                if engine.supportsManualBehavior(.layDown) {
+                    Button("Test Lay Down") {
+                        engine.setManualBehaviorOverride(.layDown)
+                    }
+                }
+
+                if engine.supportsManualBehavior(.sleep) {
+                    Button("Test Sleep") {
+                        engine.setManualBehaviorOverride(.sleep)
+                    }
+                }
+
+                if engine.supportsManualBehavior(.extraTwo) {
+                    Button("Test Extra 2") {
+                        engine.playOneShotBehavior(.extraTwo)
+                    }
                 }
 
                 Divider()

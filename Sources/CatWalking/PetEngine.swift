@@ -6,6 +6,9 @@ import Foundation
 final class PetEngine: ObservableObject {
     private static let groomLoopStartFrame = 1
     private static let groomLoopEndFrame = 3
+    private static let sleepLoopStartFrame = 0
+    private static let sleepLoopEndFrame = 1
+    private static let sleepFrameAdvanceDivisor = 4
     private static let speechBubbleSpacing: CGFloat = 1
     private static let speechBubbleHorizontalPadding: CGFloat = 14
     private static let speechBubbleVerticalPadding: CGFloat = 10
@@ -23,6 +26,18 @@ final class PetEngine: ObservableObject {
         }
     }
 
+    struct RandomSource: Sendable {
+        let nextUnitDouble: @Sendable () -> Double
+        let nextBool: @Sendable () -> Bool
+        let randomDuration: @Sendable (ClosedRange<Double>) -> Double
+
+        static let live = RandomSource(
+            nextUnitDouble: { Double.random(in: 0 ... 1) },
+            nextBool: { Bool.random() },
+            randomDuration: { Double.random(in: $0) }
+        )
+    }
+
     enum Behavior: CaseIterable {
         case walkDown
         case walkLeft
@@ -30,6 +45,9 @@ final class PetEngine: ObservableObject {
         case walkUp
         case idle
         case groom
+        case layDown
+        case sleep
+        case extraTwo
 
         var spriteSequence: SpriteSequence {
             switch self {
@@ -45,9 +63,24 @@ final class PetEngine: ObservableObject {
                 return .idle
             case .groom:
                 return .groom
+            case .layDown:
+                return .layDown
+            case .sleep:
+                return .sleep
+            case .extraTwo:
+                return .extraTwo
             }
         }
     }
+
+    private static let automaticBehaviors: [Behavior] = [
+        .walkDown,
+        .walkLeft,
+        .walkRight,
+        .walkUp,
+        .idle,
+        .groom
+    ]
 
     private enum IdlePlaybackState {
         case inactive
@@ -59,6 +92,13 @@ final class PetEngine: ObservableObject {
     private enum GroomPlaybackState {
         case inactive
         case active
+    }
+
+    private enum SleepPlaybackState {
+        case inactive
+        case enteringFromLayDown
+        case enteringFromStanding
+        case sleeping
     }
 
     @Published private(set) var currentFrame: NSImage
@@ -74,6 +114,7 @@ final class PetEngine: ObservableObject {
 
     private let settings: AppSettings
     private var spriteSheet: SpriteSheet
+    private let randomSource: RandomSource
     private var animationTimer: Timer?
     private var movementTimer: Timer?
     private var behaviorTimer: Timer?
@@ -82,11 +123,14 @@ final class PetEngine: ObservableObject {
     private var currentFrameIndex = 0
     private var idlePlaybackState: IdlePlaybackState = .inactive
     private var groomPlaybackState: GroomPlaybackState = .inactive
+    private var sleepPlaybackState: SleepPlaybackState = .inactive
+    private var sleepFrameAdvanceCountdown = 0
     private var remainingGroomLoops = 0
+    private var sleepEndDate: Date?
     private var pendingBehaviorAfterIdleExit: Behavior?
     private var pendingBehaviorAfterIdleSit: Behavior?
 
-    init(settings: AppSettings, spriteSheet: SpriteSheet) {
+    init(settings: AppSettings, spriteSheet: SpriteSheet, randomSource: RandomSource = .live) {
         let initialPetSize = CGSize(
             width: spriteSheet.frameSize.width * settings.catScale,
             height: spriteSheet.frameSize.height * settings.catScale
@@ -100,6 +144,7 @@ final class PetEngine: ObservableObject {
 
         self.settings = settings
         self.spriteSheet = spriteSheet
+        self.randomSource = randomSource
         self.screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 2560, height: 1600)
         self.behavior = .idle
         self.manualBehaviorOverride = nil
@@ -149,6 +194,7 @@ final class PetEngine: ObservableObject {
         spriteSheet = newSpriteSheet
         currentFrameIndex = 0
         refreshContentSize()
+        reconcileBehaviorAvailability()
         updateFrameImage()
     }
 
@@ -162,6 +208,16 @@ final class PetEngine: ObservableObject {
         }
 
         chooseNextBehavior()
+    }
+
+    func playOneShotBehavior(_ behavior: Behavior) {
+        guard isBehaviorEnabled(behavior) else {
+            return
+        }
+
+        manualBehaviorOverride = nil
+        behaviorTimer?.invalidate()
+        applyBehavior(behavior)
     }
 
     var currentBehaviorDisplayName: String {
@@ -178,7 +234,17 @@ final class PetEngine: ObservableObject {
             return "Idle"
         case .groom:
             return "Groom"
+        case .layDown:
+            return "Lay Down"
+        case .sleep:
+            return "Sleep"
+        case .extraTwo:
+            return "Extra 2"
         }
+    }
+
+    func supportsManualBehavior(_ behavior: Behavior) -> Bool {
+        isBehaviorEnabled(behavior)
     }
 
     private func refreshContentSize() {
@@ -216,7 +282,7 @@ final class PetEngine: ObservableObject {
         if speechBubbleText != nil {
             scheduleNextSpeechBubbleEvent(after: max(0.5, settings.speechBubbleDuration))
         } else {
-            scheduleNextSpeechBubbleEvent(after: Double.random(in: Self.speechBubbleMinimumInterval))
+            scheduleNextSpeechBubbleEvent(after: nextSpeechBubbleAttemptInterval())
         }
     }
 
@@ -241,14 +307,24 @@ final class PetEngine: ObservableObject {
 
     private func showRandomSpeechBubble() {
         guard settings.enableSpeechBubble else {
+            pauseSpeechBubbleCycle(clearBubble: true)
+            return
+        }
+
+        guard !settings.speechBubbleMessages.isEmpty else {
             speechBubbleText = nil
             refreshContentSize()
             return
         }
 
+        guard behavior != .sleep else {
+            pauseSpeechBubbleCycle(clearBubble: true)
+            return
+        }
+
         let clampedChance = min(max(settings.speechBubbleChance, 0), 1)
-        guard Double.random(in: 0 ... 1) <= clampedChance else {
-            scheduleNextSpeechBubbleEvent(after: Double.random(in: Self.speechBubbleMinimumInterval))
+        guard randomSource.nextUnitDouble() < clampedChance else {
+            scheduleNextSpeechBubbleEvent(after: nextSpeechBubbleAttemptInterval())
             return
         }
 
@@ -263,10 +339,29 @@ final class PetEngine: ObservableObject {
         scheduleNextSpeechBubbleEvent(after: max(0.5, settings.speechBubbleDuration))
     }
 
+    private func nextSpeechBubbleAttemptInterval() -> Double {
+        let baseInterval = randomSource.randomDuration(Self.speechBubbleMinimumInterval)
+        let clampedChance = min(max(settings.speechBubbleChance, 0), 1)
+
+        // Lower chance should also reduce retry frequency, not only per-attempt success.
+        let retryScale = 1 + ((1 - clampedChance) * 8)
+        return baseInterval * retryScale
+    }
+
+    private func pauseSpeechBubbleCycle(clearBubble: Bool) {
+        speechBubbleTimer?.invalidate()
+        speechBubbleTimer = nil
+
+        if clearBubble, speechBubbleText != nil {
+            speechBubbleText = nil
+            refreshContentSize()
+        }
+    }
+
     private func hideSpeechBubble() {
         speechBubbleText = nil
         refreshContentSize()
-        scheduleNextSpeechBubbleEvent(after: Double.random(in: Self.speechBubbleMinimumInterval))
+        scheduleNextSpeechBubbleEvent(after: nextSpeechBubbleAttemptInterval())
     }
 
     private func speechBubbleSize(for text: String?) -> CGSize {
@@ -338,6 +433,16 @@ final class PetEngine: ObservableObject {
             return
         }
 
+        if behavior == .sleep {
+            advanceSleepAnimationFrame(frames: frames)
+            return
+        }
+
+        if behavior == .layDown {
+            advanceLayDownAnimationFrame(frames: frames)
+            return
+        }
+
         currentFrameIndex = (currentFrameIndex + 1) % frames.count
         updateFrameImage()
     }
@@ -352,7 +457,7 @@ final class PetEngine: ObservableObject {
             if positionY <= minimumPositionY {
                 positionY = minimumPositionY
                 chooseNextBehavior(preferred: [
-                    PreferredBehaviorOption(.walkUp, chance: 0.30),
+                    PreferredBehaviorOption(.walkUp, chance: 0.70),
                     PreferredBehaviorOption(.idle, chance: 1)
                 ])
             }
@@ -361,7 +466,7 @@ final class PetEngine: ObservableObject {
             if positionX <= 0 {
                 positionX = 0
                 chooseNextBehavior(preferred: [
-                    PreferredBehaviorOption(.walkRight, chance: 0.30),
+                    PreferredBehaviorOption(.walkRight, chance: 0.70),
                     PreferredBehaviorOption(.idle, chance: 1)
                 ])
             }
@@ -371,7 +476,7 @@ final class PetEngine: ObservableObject {
             if positionX >= maxX {
                 positionX = maxX
                 chooseNextBehavior(preferred: [
-                    PreferredBehaviorOption(.walkLeft, chance: 0.30),
+                    PreferredBehaviorOption(.walkLeft, chance: 0.70),
                     PreferredBehaviorOption(.idle, chance: 1)
                 ])
             }
@@ -381,11 +486,11 @@ final class PetEngine: ObservableObject {
             if positionY >= maximumPositionY {
                 positionY = maximumPositionY
                 chooseNextBehavior(preferred: [
-                    PreferredBehaviorOption(.walkDown, chance: 0.30),
+                    PreferredBehaviorOption(.walkDown, chance: 0.70),
                     PreferredBehaviorOption(.idle, chance: 1)
                 ])
             }
-        case .idle, .groom:
+        case .idle, .groom, .layDown, .sleep, .extraTwo:
             break
         }
     }
@@ -426,6 +531,10 @@ final class PetEngine: ObservableObject {
                 return .groom
             }
 
+            if preferredBehavior == .sleep, isBehaviorEnabled(.sleep) {
+                return .sleep
+            }
+
             if preferredBehavior != .idle {
                 return preferredBehavior
             }
@@ -434,11 +543,15 @@ final class PetEngine: ObservableObject {
         
 
         if isBehaviorEnabled(.idle), Double.random(in: 0 ... 1) < seatedIdleHoldChance {
-            if isBehaviorEnabled(.groom), Bool.random() {
-                return .groom
-            }
+                    if isBehaviorEnabled(.sleep), randomSource.nextUnitDouble() < sleepFrequencyChance {
+                        return .sleep
+                    }
 
-                return .idle
+                    if isBehaviorEnabled(.groom), randomSource.nextBool() {
+                        return .groom
+                    }
+
+                    return .idle
         }
 
         let standingBehaviors = [Behavior.walkDown, .walkLeft, .walkRight, .walkUp]
@@ -446,9 +559,17 @@ final class PetEngine: ObservableObject {
         return standingBehaviors.randomElement() ?? .idle
     }
 
+    private func nextBehaviorWhileSleep() -> Behavior {
+        if isBehaviorEnabled(.sleep), randomSource.nextUnitDouble() < sleepFrequencyChance {
+            return .sleep
+        }
+
+        return .layDown
+    }
+
     private func selectedPreferredBehavior(from options: [PreferredBehaviorOption]) -> Behavior? {
         for option in options where isBehaviorEnabled(option.behavior) {
-            if Double.random(in: 0 ... 1) < option.chance {
+            if randomSource.nextUnitDouble() < option.chance {
                 return option.behavior
             }
         }
@@ -496,6 +617,10 @@ final class PetEngine: ObservableObject {
         min(max(settings.sitPreference, 0), 1)
     }
 
+    private var sleepFrequencyChance: Double {
+        min(max(settings.sleepFrequency, 0), 1)
+    }
+
     private var maximumPositionX: CGFloat {
         max(0, screenFrame.width - contentSize.width)
     }
@@ -535,49 +660,100 @@ final class PetEngine: ObservableObject {
     }
 
     private func fallbackBehaviors() -> [Behavior] {
-        let enabled = Behavior.allCases.filter(isBehaviorEnabled)
+        let enabled = Self.automaticBehaviors.filter(isBehaviorEnabled)
+
+        // Keep the pet visible and recoverable even if the user disables every automatic behavior.
         return enabled.isEmpty ? [.idle] : enabled
+    }
+
+    private func hasFrames(for behavior: Behavior) -> Bool {
+        !spriteSheet.frames(for: behavior.spriteSequence).isEmpty
     }
 
     private func isBehaviorEnabled(_ behavior: Behavior) -> Bool {
         switch behavior {
         case .walkDown:
-            return settings.enableWalkDown
+            return settings.enableWalkDown && hasFrames(for: behavior)
         case .walkLeft:
-            return settings.enableWalkLeft
+            return settings.enableWalkLeft && hasFrames(for: behavior)
         case .walkRight:
-            return settings.enableWalkRight
+            return settings.enableWalkRight && hasFrames(for: behavior)
         case .walkUp:
-            return settings.enableWalkUp
+            return settings.enableWalkUp && hasFrames(for: behavior)
         case .idle:
-            return settings.enableIdle
+            return settings.enableIdle && hasFrames(for: behavior)
         case .groom:
-            return settings.enableGroom
+            return settings.enableGroom && hasFrames(for: behavior)
+        case .layDown:
+            return hasFrames(for: behavior)
+        case .sleep:
+            return settings.enableSleep && hasFrames(for: behavior)
+        case .extraTwo:
+            return hasFrames(for: behavior)
         }
     }
 
     private func applyBehavior(_ newBehavior: Behavior) {
+        let previousBehavior = behavior
         behavior = newBehavior
         pendingBehaviorAfterIdleExit = nil
+        sleepEndDate = nil
+        sleepFrameAdvanceCountdown = 0
+
+        if newBehavior == .sleep,
+           speechBubbleText != nil || speechBubbleTimer != nil {
+            pauseSpeechBubbleCycle(clearBubble: true)
+        } else if previousBehavior == .sleep {
+            restartSpeechBubbleCycle()
+        }
 
         if newBehavior == .idle {
             idlePlaybackState = .entering
             groomPlaybackState = .inactive
+            sleepPlaybackState = .inactive
             remainingGroomLoops = 0
             currentFrameIndex = 0
         } else if newBehavior == .groom {
             idlePlaybackState = .seated
             groomPlaybackState = .active
+            sleepPlaybackState = .inactive
             remainingGroomLoops = Int.random(in: 1 ... 5)
             currentFrameIndex = groomLoopStartIndex(for: spriteSheet.frames(for: .groom))
+        } else if newBehavior == .layDown {
+            idlePlaybackState = .inactive
+            groomPlaybackState = .inactive
+            sleepPlaybackState = .inactive
+            remainingGroomLoops = 0
+            currentFrameIndex = 0
+        } else if newBehavior == .sleep {
+            idlePlaybackState = .inactive
+            groomPlaybackState = .inactive
+            remainingGroomLoops = 0
+
+            if previousBehavior == .layDown {
+                sleepPlaybackState = .enteringFromLayDown
+                currentFrameIndex = 0
+                if let restingFrame = spriteSheet.frames(for: .layDown).last {
+                    currentFrame = restingFrame
+                }
+            } else {
+                sleepPlaybackState = .enteringFromStanding
+                currentFrameIndex = 0
+                if let firstLayDownFrame = spriteSheet.frames(for: .layDown).first {
+                    currentFrame = firstLayDownFrame
+                }
+            }
         } else {
             idlePlaybackState = .inactive
             groomPlaybackState = .inactive
+            sleepPlaybackState = .inactive
             remainingGroomLoops = 0
             currentFrameIndex = 0
         }
 
-        updateFrameImage()
+        if newBehavior != .sleep {
+            updateFrameImage()
+        }
         scheduleBehaviorTimer(for: newBehavior)
     }
 
@@ -590,6 +766,25 @@ final class PetEngine: ObservableObject {
     }
 
     private func transition(to nextBehavior: Behavior) {
+        if nextBehavior == .sleep,
+           behavior == .layDown {
+            applyBehavior(.sleep)
+            return
+        }
+
+        if nextBehavior == .sleep,
+           behavior != .idle || idlePlaybackState != .seated {
+            beginIdleEnterTransition(for: .sleep)
+            return
+        }
+
+        if nextBehavior == .sleep,
+           behavior == .idle,
+           idlePlaybackState == .seated {
+            applyBehavior(.sleep)
+            return
+        }
+
         if nextBehavior == .idle,
            behavior == .idle,
            idlePlaybackState == .seated {
@@ -615,6 +810,12 @@ final class PetEngine: ObservableObject {
             beginReturnToSeatedIdle(nextBehavior: nextBehavior)
             return
         }
+
+          if behavior == .sleep,
+              nextBehavior != .sleep {
+                finishSleep(nextBehavior: nextBehavior)
+                return
+          }
 
         if behavior == .idle,
            nextBehavior != .idle,
@@ -724,6 +925,129 @@ final class PetEngine: ObservableObject {
         }
     }
 
+    private func advanceLayDownAnimationFrame(frames: [NSImage]) {
+        guard !frames.isEmpty else { return }
+
+        if currentFrameIndex < frames.count - 1 {
+            currentFrameIndex += 1
+        } else {
+            currentFrameIndex = frames.count - 1
+        }
+
+        updateFrameImage()
+    }
+
+    private func advanceSleepAnimationFrame(frames: [NSImage]) {
+        guard !frames.isEmpty else { return }
+
+        switch sleepPlaybackState {
+        case .inactive:
+            currentFrameIndex = min(currentFrameIndex, frames.count - 1)
+            updateFrameImage()
+        case .enteringFromLayDown:
+            startSleepLoop(frames: frames)
+        case .enteringFromStanding:
+            let layDownFrames = spriteSheet.frames(for: .layDown)
+            if layDownFrames.isEmpty {
+                startSleepLoop(frames: frames)
+                return
+            }
+
+            if currentFrameIndex < layDownFrames.count {
+                currentFrame = layDownFrames[currentFrameIndex]
+                currentFrameIndex += 1
+                return
+            }
+
+            startSleepLoop(frames: frames)
+        case .sleeping:
+            if let sleepEndDate, Date() >= sleepEndDate {
+                let nextBehavior = nextBehaviorWhileSleep()
+                if nextBehavior == .sleep {
+                    startSleepLoop(frames: frames)
+                } else {
+                    finishSleep(nextBehavior: nextBehavior)
+                }
+                return
+            }
+
+            if sleepFrameAdvanceCountdown < Self.sleepFrameAdvanceDivisor - 1 {
+                sleepFrameAdvanceCountdown += 1
+                return
+            }
+
+            sleepFrameAdvanceCountdown = 0
+
+            let loopStart = sleepLoopStartIndex(for: frames)
+            let loopEnd = sleepLoopEndIndex(for: frames)
+            if currentFrameIndex < loopStart || currentFrameIndex > loopEnd {
+                currentFrameIndex = loopStart
+            } else if currentFrameIndex < loopEnd {
+                currentFrameIndex += 1
+            } else {
+                currentFrameIndex = loopStart
+            }
+            updateFrameImage()
+        }
+    }
+
+    private func startSleepLoop(frames: [NSImage]) {
+        sleepPlaybackState = .sleeping
+        sleepEndDate = Date().addingTimeInterval(randomDuration(for: 8.0 ... 18.0, behavior: .sleep))
+        sleepFrameAdvanceCountdown = 0
+        currentFrameIndex = sleepLoopStartIndex(for: frames)
+        updateFrameImage()
+    }
+
+    private var lazyDurationMultiplier: Double {
+        1 + (min(max(settings.lazyPercentage, 0), 1) * 2)
+    }
+
+    private func randomDuration(for baseRange: ClosedRange<Double>, behavior: Behavior) -> Double {
+        let multiplier = lazyDurationMultiplier
+        let adjustedRange: ClosedRange<Double>
+
+        switch behavior {
+        case .walkDown, .walkLeft, .walkRight, .walkUp:
+            adjustedRange = (baseRange.lowerBound / multiplier) ... (baseRange.upperBound / multiplier)
+        case .idle, .layDown, .sleep:
+            adjustedRange = (baseRange.lowerBound * multiplier) ... (baseRange.upperBound * multiplier)
+        case .groom, .extraTwo:
+            adjustedRange = baseRange
+        }
+
+        return randomSource.randomDuration(adjustedRange)
+    }
+
+    private func sleepLoopStartIndex(for frames: [NSImage]) -> Int {
+        min(Self.sleepLoopStartFrame, max(0, frames.count - 1))
+    }
+
+    private func sleepLoopEndIndex(for frames: [NSImage]) -> Int {
+        max(sleepLoopStartIndex(for: frames), min(Self.sleepLoopEndFrame, frames.count - 1))
+    }
+
+    private func finishSleep(nextBehavior: Behavior) {
+        sleepEndDate = nil
+        sleepPlaybackState = .inactive
+
+        if nextBehavior == .layDown {
+            applyLayDownRestPose(scheduleTimer: true)
+            restartSpeechBubbleCycle()
+            return
+        }
+
+        applyLayDownRestPose(scheduleTimer: false)
+        restartSpeechBubbleCycle()
+        behaviorTimer?.invalidate()
+        behaviorTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.chooseNextBehavior(preferred: [PreferredBehaviorOption(nextBehavior, chance: 1)])
+            }
+        }
+        RunLoop.main.add(behaviorTimer!, forMode: .common)
+    }
+
     private func groomLoopStartIndex(for frames: [NSImage]) -> Int {
         min(Self.groomLoopStartFrame, max(0, frames.count - 1))
     }
@@ -748,8 +1072,39 @@ final class PetEngine: ObservableObject {
         scheduleBehaviorTimer(for: .idle)
     }
 
+    private func applyLayDownRestPose(scheduleTimer: Bool) {
+        let layDownFrames = spriteSheet.frames(for: .layDown)
+
+        behavior = .layDown
+        idlePlaybackState = .inactive
+        groomPlaybackState = .inactive
+        sleepPlaybackState = .inactive
+        remainingGroomLoops = 0
+        sleepEndDate = nil
+        currentFrameIndex = max(0, layDownFrames.count - 1)
+
+        if let restingFrame = layDownFrames.last {
+            currentFrame = restingFrame
+        } else {
+            updateFrameImage()
+        }
+
+        behaviorTimer?.invalidate()
+        if scheduleTimer {
+            scheduleBehaviorTimer(for: .layDown)
+        } else {
+            behaviorTimer = nil
+        }
+    }
+
     private func scheduleBehaviorTimer(for behavior: Behavior) {
         if behavior == .groom {
+            behaviorTimer?.invalidate()
+            behaviorTimer = nil
+            return
+        }
+
+        if behavior == .sleep {
             behaviorTimer?.invalidate()
             behaviorTimer = nil
             return
@@ -767,10 +1122,16 @@ final class PetEngine: ObservableObject {
             duration = 1.0 ... 3.0
         case .groom:
             return
+        case .layDown:
+            duration = 10.0 ... 20.0
+        case .sleep:
+            return
+        case .extraTwo:
+            duration = 1.0 ... 2.0
         }
 
         behaviorTimer?.invalidate()
-        behaviorTimer = Timer.scheduledTimer(withTimeInterval: Double.random(in: duration), repeats: false) { [weak self] _ in
+        behaviorTimer = Timer.scheduledTimer(withTimeInterval: randomDuration(for: duration, behavior: behavior), repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.chooseNextBehavior()
             }
@@ -778,3 +1139,35 @@ final class PetEngine: ObservableObject {
         RunLoop.main.add(behaviorTimer!, forMode: .common)
     }
 }
+
+#if DEBUG
+extension PetEngine {
+    var currentBehaviorForTesting: Behavior {
+        behavior
+    }
+
+    var isSpeechBubbleTimerActiveForTesting: Bool {
+        speechBubbleTimer?.isValid ?? false
+    }
+
+    var currentSpeechBubbleTextForTesting: String? {
+        speechBubbleText
+    }
+
+    func advanceSpeechBubbleCycleForTesting() {
+        advanceSpeechBubbleCycle()
+    }
+
+    func applyBehaviorForTesting(_ behavior: Behavior) {
+        applyBehavior(behavior)
+    }
+
+    func nextAutomaticBehaviorForTesting() -> Behavior {
+        nextAutomaticBehavior()
+    }
+
+    func nextBehaviorWhileSleepForTesting() -> Behavior {
+        nextBehaviorWhileSleep()
+    }
+}
+#endif

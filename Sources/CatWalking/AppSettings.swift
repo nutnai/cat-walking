@@ -21,6 +21,8 @@ final class AppSettings: ObservableObject {
         static let defaultYOffset = "defaultYOffset"
         static let verticalMovementRange = "verticalMovementRange"
         static let sitPreference = "sitPreference"
+        static let sleepFrequency = "sleepFrequency"
+        static let lazyPercentage = "lazyPercentage"
         static let stayOnTop = "stayOnTop"
         static let enableWalkDown = "enableWalkDown"
         static let enableWalkLeft = "enableWalkLeft"
@@ -28,6 +30,7 @@ final class AppSettings: ObservableObject {
         static let enableWalkUp = "enableWalkUp"
         static let enableIdle = "enableIdle"
         static let enableGroom = "enableGroom"
+        static let enableSleep = "enableSleep"
     }
 
     private let defaults: UserDefaults
@@ -105,6 +108,14 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(sitPreference, forKey: Keys.sitPreference) }
     }
 
+    @Published var sleepFrequency: Double {
+        didSet { defaults.set(sleepFrequency, forKey: Keys.sleepFrequency) }
+    }
+
+    @Published var lazyPercentage: Double {
+        didSet { defaults.set(lazyPercentage, forKey: Keys.lazyPercentage) }
+    }
+
     @Published var stayOnTop: Bool {
         didSet { defaults.set(stayOnTop, forKey: Keys.stayOnTop) }
     }
@@ -131,6 +142,10 @@ final class AppSettings: ObservableObject {
 
     @Published var enableGroom: Bool {
         didSet { defaults.set(enableGroom, forKey: Keys.enableGroom) }
+    }
+
+    @Published var enableSleep: Bool {
+        didSet { defaults.set(enableSleep, forKey: Keys.enableSleep) }
     }
 
     var speechBubbleMessages: [String] {
@@ -204,6 +219,8 @@ final class AppSettings: ObservableObject {
         self.defaultYOffset = defaults.object(forKey: Keys.defaultYOffset) as? Double ?? 0.0
         self.verticalMovementRange = defaults.object(forKey: Keys.verticalMovementRange) as? Double ?? 180.0
         self.sitPreference = defaults.object(forKey: Keys.sitPreference) as? Double ?? 0.5
+        self.sleepFrequency = defaults.object(forKey: Keys.sleepFrequency) as? Double ?? 0.5
+        self.lazyPercentage = defaults.object(forKey: Keys.lazyPercentage) as? Double ?? 0.3
         self.stayOnTop = defaults.object(forKey: Keys.stayOnTop) as? Bool ?? true
         self.enableWalkDown = defaults.object(forKey: Keys.enableWalkDown) as? Bool ?? false
         self.enableWalkLeft = defaults.object(forKey: Keys.enableWalkLeft) as? Bool ?? true
@@ -211,6 +228,7 @@ final class AppSettings: ObservableObject {
         self.enableWalkUp = defaults.object(forKey: Keys.enableWalkUp) as? Bool ?? false
         self.enableIdle = defaults.object(forKey: Keys.enableIdle) as? Bool ?? true
         self.enableGroom = defaults.object(forKey: Keys.enableGroom) as? Bool ?? true
+        self.enableSleep = defaults.object(forKey: Keys.enableSleep) as? Bool ?? true
 
         if !enableVerticalMovement {
             enableWalkDown = false
